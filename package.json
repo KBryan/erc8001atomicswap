@@ -1,0 +1,75 @@
+{
+  "name": "@erc8001/sdk",
+  "version": "0.1.0",
+  "description": "ERC-8001 Agent Coordination Framework - Contracts and TypeScript SDK",
+  "author": "Kwame",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src/contracts/**/*.sol",
+    "!src/contracts/**/*.t.sol"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./contracts": "./src/contracts/index.sol",
+    "./contracts/*": "./src/contracts/*"
+  },
+  "scripts": {
+    "build": "tsup src/ts/index.ts --format cjs,esm --dts --clean",
+    "build:contracts": "forge build",
+    "test": "forge test",
+    "test:ts": "vitest run",
+    "typechain": "typechain --target ethers-v6 --out-dir src/ts/typechain 'out/**/*.json'",
+    "prepublishOnly": "npm run build",
+    "lint": "eslint src/ts --ext .ts",
+    "clean": "rm -rf dist out cache"
+  },
+  "keywords": [
+    "ethereum",
+    "erc8001",
+    "agents",
+    "coordination",
+    "multi-party",
+    "solidity",
+    "web3",
+    "ai-agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anthropic/erc8001-sdk"
+  },
+  "devDependencies": {
+    "@typechain/ethers-v6": "^0.5.1",
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.1",
+    "typechain": "^8.3.2",
+    "typescript": "^5.3.2",
+    "vitest": "^1.0.4"
+  },
+  "dependencies": {
+    "ethers": "^6.9.0",
+    "viem": "^2.0.0"
+  },
+  "peerDependencies": {
+    "ethers": ">=6.0.0",
+    "viem": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ethers": {
+      "optional": true
+    },
+    "viem": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

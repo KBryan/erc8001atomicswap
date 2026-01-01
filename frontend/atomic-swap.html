@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AtomicSwap - ERC-8001 Hello World</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.9.0/ethers.umd.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #111827;
+      color: #fff;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1 { text-align: center; font-size: 2rem; margin-bottom: 8px; }
+    .subtitle { text-align: center; color: #9ca3af; margin-bottom: 32px; }
+    .card {
+      background: #1f2937;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .card h3 { font-size: 1rem; margin-bottom: 12px; color: #e5e7eb; }
+    .row { display: flex; justify-content: space-between; align-items: center; }
+    .label { font-size: 0.875rem; color: #9ca3af; }
+    .value { font-size: 1.25rem; font-weight: 600; }
+    .value-small { font-size: 0.75rem; color: #6b7280; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .btn {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #2563eb; }
+    .btn:disabled { background: #4b5563; cursor: not-allowed; }
+    .btn-sm { padding: 6px 12px; font-size: 0.875rem; margin-top: 8px; }
+    .btn-green { background: #059669; }
+    .btn-green:hover { background: #047857; }
+    .btn-yellow { background: #d97706; }
+    .btn-yellow:hover { background: #b45309; }
+    .btn-group { display: flex; gap: 8px; margin-bottom: 16px; }
+    .btn-group .btn { flex: 1; }
+    .btn-group .btn.active { background: #3b82f6; }
+    .btn-group .btn:not(.active) { background: #374151; }
+    input {
+      width: 100%;
+      background: #374151;
+      border: 1px solid #4b5563;
+      border-radius: 8px;
+      padding: 12px;
+      color: white;
+      font-size: 1rem;
+      margin-bottom: 12px;
+    }
+    input::placeholder { color: #6b7280; }
+    input:focus { outline: none; border-color: #3b82f6; }
+    .input-label { display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 4px; }
+    .alert {
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 0.875rem;
+    }
+    .alert-error { background: rgba(220,38,38,0.2); border: 1px solid #dc2626; color: #fca5a5; }
+    .alert-success { background: rgba(5,150,105,0.2); border: 1px solid #059669; color: #6ee7b7; }
+    .log-box {
+      background: #111827;
+      border-radius: 8px;
+      padding: 12px;
+      height: 120px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+    .log-box p { margin-bottom: 4px; }
+    .status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.875rem; font-weight: 600; }
+    .status-proposed { background: #fbbf24; color: #000; }
+    .status-ready { background: #34d399; color: #000; }
+    .status-executed { background: #60a5fa; color: #000; }
+    .footer { text-align: center; font-size: 0.75rem; color: #6b7280; margin-top: 24px; }
+    .footer a { color: #60a5fa; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .mono { font-family: monospace; }
+    .network-ok { color: #34d399; }
+    .network-bad { color: #f87171; }
+    .hidden { display: none; }
+    .mb-2 { margin-bottom: 8px; }
+    .text-center { text-align: center; }
+    .intent-hash-display {
+      background: #374151;
+      padding: 12px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.75rem;
+      word-break: break-all;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚡ AtomicSwap</h1>
+    <p class="subtitle">ERC-8001 Hello World • Base Sepolia</p>
+
+    <div id="connect-section" class="text-center">
+      <button class="btn" onclick="connectWallet()">Connect Wallet</button>
+    </div>
+
+    <div id="app-section" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div>
+            <p class="label">Connected</p>
+            <p class="mono" id="account-display">0x...</p>
+          </div>
+          <div style="text-align: right;">
+            <p class="label">Network</p>
+            <p id="network-display">-</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Balances</h3>
+        <div class="grid">
+          <div>
+            <p class="label">mUSDC</p>
+            <p class="value" id="usdc-balance">0.00</p>
+            <p class="value-small">Approved: <span id="usdc-allowance">0</span></p>
+            <button class="btn btn-sm" onclick="approveToken('USDC')">Approve USDC</button>
+          </div>
+          <div>
+            <p class="label">mWETH</p>
+            <p class="value" id="weth-balance">0.0000</p>
+            <p class="value-small">Approved: <span id="weth-allowance">0</span></p>
+            <button class="btn btn-sm" onclick="approveToken('WETH')">Approve WETH</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn active" id="btn-propose" onclick="setMode('propose')">Propose</button>
+        <button class="btn" id="btn-accept" onclick="setMode('accept')">Accept</button>
+        <button class="btn" id="btn-execute" onclick="setMode('execute')">Execute</button>
+      </div>
+
+      <div class="card" id="form-propose">
+        <h3>Propose Swap</h3>
+        <label class="input-label">I offer (USDC)</label>
+        <input type="text" id="offer-amount" placeholder="100" value="100">
+        <label class="input-label">I want (WETH)</label>
+        <input type="text" id="want-amount" placeholder="0.1" value="0.1">
+        <label class="input-label">Counterparty Address</label>
+        <input type="text" id="counterparty" placeholder="0x...">
+        <button class="btn btn-green" onclick="proposeSwap()" id="btn-propose-submit">Propose Swap</button>
+        <div id="intent-hash-result" class="hidden" style="margin-top: 12px;">
+          <p class="label">Intent Hash (share with counterparty):</p>
+          <div class="intent-hash-display" id="intent-hash-display"></div>
+        </div>
+      </div>
+
+      <div class="card hidden" id="form-accept">
+        <h3>Accept Swap</h3>
+        <label class="input-label">Intent Hash</label>
+        <input type="text" id="intent-hash-accept" placeholder="0x..." oninput="checkStatus(this.value, 'status-accept')">
+        <p class="mb-2">Status: <span id="status-accept" class="status">-</span></p>
+        <button class="btn btn-yellow" onclick="acceptSwap()" id="btn-accept-submit">Accept Swap</button>
+      </div>
+
+      <div class="card hidden" id="form-execute">
+        <h3>Execute Swap</h3>
+        <label class="input-label">Intent Hash</label>
+        <input type="text" id="intent-hash-execute" placeholder="0x..." oninput="checkStatus(this.value, 'status-execute')">
+        <p class="mb-2">Status: <span id="status-execute" class="status">-</span></p>
+        <button class="btn" onclick="executeSwap()" id="btn-execute-submit">Execute Swap</button>
+        <p class="value-small" style="margin-top: 8px;">Note: You need the original swap terms to execute</p>
+      </div>
+
+      <div id="error-box" class="alert alert-error hidden"></div>
+      <div id="success-box" class="alert alert-success hidden"></div>
+
+      <div class="card">
+        <h3>Activity Log</h3>
+        <div class="log-box" id="log-box"><p>Ready...</p></div>
+      </div>
+
+      <div class="footer">
+        <p class="mb-2">AtomicSwap: 0xD25FaF692736b74A674c8052F904b5C77f9cb2Ed</p>
+        <p class="mb-2">mUSDC: 0x17abd6d0355cB2B933C014133B14245412ca00B6 | mWETH: 0xddFaC73904FE867B5526510E695826f4968A2357</p>
+        <p><a href="https://sepolia.basescan.org/address/0xD25FaF692736b74A674c8052F904b5C77f9cb2Ed" target="_blank">View on BaseScan ↗</a></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ══════════════════════════════════════════════════════════════════════════
+    // CONFIGURATION
+    // ══════════════════════════════════════════════════════════════════════════
+    
+    const ATOMIC_SWAP = '0xD25FaF692736b74A674c8052F904b5C77f9cb2Ed';
+    const MOCK_USDC = '0x17abd6d0355cB2B933C014133B14245412ca00B6';
+    const MOCK_WETH = '0xddFaC73904FE867B5526510E695826f4968A2357';
+    const BASE_SEPOLIA_CHAIN_ID = 84532;
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // ABIs
+    // ══════════════════════════════════════════════════════════════════════════
+
+    const ERC20_ABI = [
+      'function balanceOf(address) view returns (uint256)',
+      'function allowance(address,address) view returns (uint256)',
+      'function approve(address,uint256) returns (bool)'
+    ];
+
+    const ATOMIC_SWAP_ABI = [
+      'function proposeCoordination(tuple(bytes32 payloadHash, uint64 expiry, uint64 nonce, address agentId, bytes32 coordinationType, uint256 coordinationValue, address[] participants) intent, tuple(bytes32 version, bytes32 coordinationType, address[] participants, bytes coordinationData) payload, bytes signature) returns (bytes32)',
+      'function acceptCoordination(bytes32 intentHash, tuple(bytes32 intentHash, uint64 expiry, address agentId) attestation, bytes signature)',
+      'function executeCoordination(bytes32 intentHash, tuple(bytes32 version, bytes32 coordinationType, address[] participants, bytes coordinationData) payload, bytes executionData)',
+      'function getCoordinationStatus(bytes32) view returns (uint8)',
+      'function getAgentNonce(address) view returns (uint64)',
+      'function DOMAIN_SEPARATOR() view returns (bytes32)',
+      'function SWAP_TYPE() view returns (bytes32)',
+      'function encodeSwapTerms(address,uint256,address,uint256) pure returns (bytes)',
+      'event CoordinationProposed(bytes32 indexed intentHash, address indexed proposer, bytes32 indexed coordinationType, address[] participants, uint64 expiry)'
+    ];
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // STATE
+    // ══════════════════════════════════════════════════════════════════════════
+
+    let provider, signer, account;
+    let swapContract, usdcContract, wethContract;
+    let currentMode = 'propose';
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // HELPERS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    function log(msg) {
+      const box = document.getElementById('log-box');
+      const time = new Date().toLocaleTimeString();
+      box.innerHTML += `<p>${time}: ${msg}</p>`;
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('error-box');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+      setTimeout(() => box.classList.add('hidden'), 8000);
+    }
+
+    function showSuccess(msg) {
+      const box = document.getElementById('success-box');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+      setTimeout(() => box.classList.add('hidden'), 8000);
+    }
+
+    function setLoading(btnId, loading) {
+      const btn = document.getElementById(btnId);
+      if (!btn.dataset.text) btn.dataset.text = btn.textContent;
+      btn.disabled = loading;
+      btn.textContent = loading ? 'Processing...' : btn.dataset.text;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // CONNECT
+    // ══════════════════════════════════════════════════════════════════════════
+
+    async function connectWallet() {
+      try {
+        if (!window.ethereum) throw new Error('Please install MetaMask');
+
+        provider = new ethers.BrowserProvider(window.ethereum);
+        signer = await provider.getSigner();
+        account = await signer.getAddress();
+
+        const network = await provider.getNetwork();
+        
+        document.getElementById('connect-section').classList.add('hidden');
+        document.getElementById('app-section').classList.remove('hidden');
+        document.getElementById('account-display').textContent = 
+          account.slice(0, 6) + '...' + account.slice(-4);
+
+        if (Number(network.chainId) === BASE_SEPOLIA_CHAIN_ID) {
+          document.getElementById('network-display').innerHTML = 
+            '<span class="network-ok">Base Sepolia ✓</span>';
+        } else {
+          document.getElementById('network-display').innerHTML = 
+            '<span class="network-bad">Wrong Network</span>';
+          try {
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0x' + BASE_SEPOLIA_CHAIN_ID.toString(16) }]
+            });
+            location.reload();
+          } catch (e) {
+            log('Please switch to Base Sepolia');
+          }
+        }
+
+        // Init contracts
+        swapContract = new ethers.Contract(ATOMIC_SWAP, ATOMIC_SWAP_ABI, signer);
+        usdcContract = new ethers.Contract(MOCK_USDC, ERC20_ABI, signer);
+        wethContract = new ethers.Contract(MOCK_WETH, ERC20_ABI, signer);
+
+        log('Connected: ' + account.slice(0, 10) + '...');
+        loadBalances();
+        setInterval(loadBalances, 15000);
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // BALANCES
+    // ══════════════════════════════════════════════════════════════════════════
+
+    async function loadBalances() {
+      if (!account) return;
+      try {
+        const [usdcBal, wethBal, usdcAllow, wethAllow] = await Promise.all([
+          usdcContract.balanceOf(account),
+          wethContract.balanceOf(account),
+          usdcContract.allowance(account, ATOMIC_SWAP),
+          wethContract.allowance(account, ATOMIC_SWAP)
+        ]);
+        document.getElementById('usdc-balance').textContent = parseFloat(ethers.formatUnits(usdcBal, 6)).toFixed(2);
+        document.getElementById('weth-balance').textContent = parseFloat(ethers.formatUnits(wethBal, 18)).toFixed(4);
+        document.getElementById('usdc-allowance').textContent = parseFloat(ethers.formatUnits(usdcAllow, 6)).toFixed(2);
+        document.getElementById('weth-allowance').textContent = parseFloat(ethers.formatUnits(wethAllow, 18)).toFixed(4);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // APPROVE
+    // ══════════════════════════════════════════════════════════════════════════
+
+    async function approveToken(token) {
+      try {
+        const contract = token === 'USDC' ? usdcContract : wethContract;
+        log(`Approving ${token}...`);
+        const tx = await contract.approve(ATOMIC_SWAP, ethers.MaxUint256);
+        log(`Tx: ${tx.hash.slice(0, 14)}...`);
+        await tx.wait();
+        log(`${token} approved!`);
+        showSuccess(`${token} approved for AtomicSwap`);
+        loadBalances();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MODE
+    // ══════════════════════════════════════════════════════════════════════════
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('btn-propose').classList.toggle('active', mode === 'propose');
+      document.getElementById('btn-accept').classList.toggle('active', mode === 'accept');
+      document.getElementById('btn-execute').classList.toggle('active', mode === 'execute');
+      document.getElementById('form-propose').classList.toggle('hidden', mode !== 'propose');
+      document.getElementById('form-accept').classList.toggle('hidden', mode !== 'accept');
+      document.getElementById('form-execute').classList.toggle('hidden', mode !== 'execute');
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PROPOSE
+    // ══════════════════════════════════════════════════════════════════════════
+
+    async function proposeSwap() {
+      setLoading('btn-propose-submit', true);
+      try {
+        const offerAmount = document.getElementById('offer-amount').value;
+        const wantAmount = document.getElementById('want-amount').value;
+        const counterparty = document.getElementById('counterparty').value;
+
+        if (!ethers.isAddress(counterparty)) throw new Error('Invalid counterparty address');
+
+        log('Creating swap proposal...');
+
+        const nonce = await swapContract.getAgentNonce(account);
+        const swapType = await swapContract.SWAP_TYPE();
+        const usdcAmount = ethers.parseUnits(offerAmount, 6);
+        const wethAmount = ethers.parseUnits(wantAmount, 18);
+        const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+        const participants = [account, counterparty];
+
+        // Encode swap terms
+        const coordinationData = await swapContract.encodeSwapTerms(
+          MOCK_USDC, usdcAmount, MOCK_WETH, wethAmount
+        );
+
+        // Build payload
+        const version = ethers.keccak256(ethers.toUtf8Bytes('V1'));
+        const payload = {
+          version,
+          coordinationType: swapType,
+          participants,
+          coordinationData
+        };
+
+        // Hash payload (matches contract logic)
+        const payloadHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+          ['bytes32', 'bytes32', 'bytes32', 'bytes32'],
+          [
+            version,
+            swapType,
+            ethers.keccak256(ethers.solidityPacked(['address[]'], [participants])),
+            ethers.keccak256(coordinationData)
+          ]
+        ));
+
+        const intent = {
+          payloadHash,
+          expiry,
+          nonce: nonce + 1n,
+          agentId: account,
+          coordinationType: swapType,
+          coordinationValue: 0n,
+          participants
+        };
+
+        log('Signing intent with EIP-712...');
+
+        // Sign with EIP-712
+        const domain = {
+          name: 'AtomicSwap',
+          version: '1',
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          verifyingContract: ATOMIC_SWAP
+        };
+
+        const types = {
+          AgentIntent: [
+            { name: 'payloadHash', type: 'bytes32' },
+            { name: 'expiry', type: 'uint64' },
+            { name: 'nonce', type: 'uint64' },
+            { name: 'agentId', type: 'address' },
+            { name: 'coordinationType', type: 'bytes32' },
+            { name: 'coordinationValue', type: 'uint256' },
+            { name: 'participants', type: 'address[]' }
+          ]
+        };
+
+        const signature = await signer.signTypedData(domain, types, intent);
+
+        log('Submitting to chain...');
+        const tx = await swapContract.proposeCoordination(intent, payload, signature);
+        log(`Tx: ${tx.hash.slice(0, 14)}...`);
+        const receipt = await tx.wait();
+
+        // Get intent hash from event
+        const iface = new ethers.Interface(ATOMIC_SWAP_ABI);
+        const eventTopic = iface.getEvent('CoordinationProposed').topicHash;
+        const event = receipt.logs.find(l => l.topics[0] === eventTopic);
+        const intentHash = event.topics[1];
+
+        // Store payload for execution
+        localStorage.setItem('payload_' + intentHash, JSON.stringify({
+          version: payload.version,
+          coordinationType: payload.coordinationType,
+          participants: payload.participants,
+          coordinationData: payload.coordinationData
+        }));
+
+        document.getElementById('intent-hash-display').textContent = intentHash;
+        document.getElementById('intent-hash-result').classList.remove('hidden');
+        document.getElementById('intent-hash-accept').value = intentHash;
+        document.getElementById('intent-hash-execute').value = intentHash;
+
+        log(`Intent hash: ${intentHash}`);
+        showSuccess('Swap proposed! Share the intent hash with counterparty.');
+        loadBalances();
+      } catch (err) {
+        showError(err.message);
+        log('Error: ' + err.message);
+      } finally {
+        setLoading('btn-propose-submit', false);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // ACCEPT
+    // ══════════════════════════════════════════════════════════════════════════
+
+    async function acceptSwap() {
+      setLoading('btn-accept-submit', true);
+      try {
+        const intentHash = document.getElementById('intent-hash-accept').value;
+        if (!intentHash.startsWith('0x') || intentHash.length !== 66) {
+          throw new Error('Invalid intent hash');
+        }
+
+        log('Creating acceptance...');
+
+        const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+        const attestation = { intentHash, expiry, agentId: account };
+
+        const domain = {
+          name: 'AtomicSwap',
+          version: '1',
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          verifyingContract: ATOMIC_SWAP
+        };
+
+        const types = {
+          AcceptanceAttestation: [
+            { name: 'intentHash', type: 'bytes32' },
+            { name: 'expiry', type: 'uint64' },
+            { name: 'agentId', type: 'address' }
+          ]
+        };
+
+        log('Signing acceptance...');
+        const signature = await signer.signTypedData(domain, types, attestation);
+
+        log('Submitting to chain...');
+        const tx = await swapContract.acceptCoordination(intentHash, attestation, signature);
+        log(`Tx: ${tx.hash.slice(0, 14)}...`);
+        await tx.wait();
+
+        log('Acceptance confirmed!');
+        showSuccess('Swap accepted! Ready for execution.');
+        checkStatus(intentHash, 'status-accept');
+        loadBalances();
+      } catch (err) {
+        showError(err.message);
+        log('Error: ' + err.message);
+      } finally {
+        setLoading('btn-accept-submit', false);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // EXECUTE
+    // ══════════════════════════════════════════════════════════════════════════
+
+    async function executeSwap() {
+      setLoading('btn-execute-submit', true);
+      try {
+        const intentHash = document.getElementById('intent-hash-execute').value;
+        if (!intentHash.startsWith('0x') || intentHash.length !== 66) {
+          throw new Error('Invalid intent hash');
+        }
+
+        // Try to get payload from localStorage
+        const stored = localStorage.getItem('payload_' + intentHash);
+        if (!stored) {
+          throw new Error('Payload not found. Propose must be done from this browser, or manually provide payload.');
+        }
+
+        const payload = JSON.parse(stored);
+        log('Executing swap...');
+
+        const tx = await swapContract.executeCoordination(intentHash, payload, '0x');
+        log(`Tx: ${tx.hash.slice(0, 14)}...`);
+        await tx.wait();
+
+        log('Swap executed!');
+        showSuccess('Swap complete! Tokens transferred.');
+        checkStatus(intentHash, 'status-execute');
+        loadBalances();
+      } catch (err) {
+        showError(err.message);
+        log('Error: ' + err.message);
+      } finally {
+        setLoading('btn-execute-submit', false);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // STATUS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    async function checkStatus(intentHash, elementId) {
+      if (!intentHash || intentHash.length !== 66) return;
+      try {
+        const status = await swapContract.getCoordinationStatus(intentHash);
+        const names = ['None', 'Proposed', 'Ready', 'Executed', 'Cancelled'];
+        const classes = ['', 'status-proposed', 'status-ready', 'status-executed', ''];
+        const el = document.getElementById(elementId);
+        el.textContent = names[Number(status)];
+        el.className = 'status ' + classes[Number(status)];
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>

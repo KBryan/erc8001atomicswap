@@ -1,0 +1,40 @@
+[profile.default]
+src = "src/contracts"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+solc = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+evm_version = "cancun"
+
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "forge-std/=lib/forge-std/src/"
+]
+
+[profile.default.fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
+
+[doc]
+out = "docs"
+repository = "https://github.com/anthropic/erc8001-sdk"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RPC ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+[rpc_endpoints]
+base_sepolia = "https://sepolia.base.org"
+base_mainnet = "https://mainnet.base.org"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ETHERSCAN VERIFICATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+[etherscan]
+base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
+base_mainnet = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api" }
