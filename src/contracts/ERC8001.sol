@@ -32,9 +32,8 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     );
 
     /// @dev EIP-712 typehash for AcceptanceAttestation
-    bytes32 public constant ACCEPTANCE_TYPEHASH = keccak256(
-        "AcceptanceAttestation(bytes32 intentHash,uint64 expiry,address agentId)"
-    );
+    bytes32 public constant ACCEPTANCE_TYPEHASH =
+        keccak256("AcceptanceAttestation(bytes32 intentHash,uint64 expiry,address agentId)");
 
     /// @dev EIP-1271 magic value for valid signatures
     bytes4 private constant EIP1271_MAGIC = 0x1626ba7e;
@@ -69,10 +68,7 @@ abstract contract ERC8001 is IERC8001, EIP712 {
      * @param name The protocol name for EIP-712 domain
      * @param version The protocol version for EIP-712 domain
      */
-    constructor(
-        string memory name,
-        string memory version
-    ) EIP712(name, version) {}
+    constructor(string memory name, string memory version) EIP712(name, version) {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     // EXTERNAL FUNCTIONS
@@ -136,11 +132,7 @@ abstract contract ERC8001 is IERC8001, EIP712 {
         }
 
         emit CoordinationProposed(
-            intentHash,
-            intent.agentId,
-            intent.coordinationType,
-            intent.participants,
-            intent.expiry
+            intentHash, intent.agentId, intent.coordinationType, intent.participants, intent.expiry
         );
 
         // Check if ready (single participant case)
@@ -205,10 +197,7 @@ abstract contract ERC8001 is IERC8001, EIP712 {
         coord.acceptedCount++;
 
         emit CoordinationAccepted(
-            intentHash,
-            attestation.agentId,
-            coord.acceptedCount,
-            coord.participants.length
+            intentHash, attestation.agentId, coord.acceptedCount, coord.participants.length
         );
 
         // Check if all participants have accepted
@@ -275,24 +264,25 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IERC8001
-    function getCoordinationStatus(
-        bytes32 intentHash
-    ) external view virtual returns (Status) {
+    function getCoordinationStatus(bytes32 intentHash) external view virtual returns (Status) {
         return _coordinations[intentHash].status;
     }
 
     /// @inheritdoc IERC8001
-    function getCoordination(
-        bytes32 intentHash
-    ) external view virtual returns (
-        Status status,
-        bytes32 payloadHash,
-        address[] memory participants,
-        address[] memory accepted,
-        uint64 expiry
-    ) {
+    function getCoordination(bytes32 intentHash)
+        external
+        view
+        virtual
+        returns (
+            Status status,
+            bytes32 payloadHash,
+            address[] memory participants,
+            address[] memory accepted,
+            uint64 expiry
+        )
+    {
         CoordinationState storage coord = _coordinations[intentHash];
-        
+
         status = coord.status;
         payloadHash = coord.payloadHash;
         participants = coord.participants;
@@ -315,10 +305,12 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     }
 
     /// @inheritdoc IERC8001
-    function hasAccepted(
-        bytes32 intentHash,
-        address participant
-    ) external view virtual returns (bool) {
+    function hasAccepted(bytes32 intentHash, address participant)
+        external
+        view
+        virtual
+        returns (bool)
+    {
         return _coordinations[intentHash].accepted[participant];
     }
 
@@ -348,54 +340,57 @@ abstract contract ERC8001 is IERC8001, EIP712 {
      * @dev Compute the EIP-712 struct hash for an AgentIntent.
      */
     function _hashIntent(AgentIntent calldata intent) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            AGENT_INTENT_TYPEHASH,
-            intent.payloadHash,
-            intent.expiry,
-            intent.nonce,
-            intent.agentId,
-            intent.coordinationType,
-            intent.coordinationValue,
-            keccak256(abi.encodePacked(intent.participants))
-        ));
+        return keccak256(
+            abi.encode(
+                AGENT_INTENT_TYPEHASH,
+                intent.payloadHash,
+                intent.expiry,
+                intent.nonce,
+                intent.agentId,
+                intent.coordinationType,
+                intent.coordinationValue,
+                keccak256(abi.encodePacked(intent.participants))
+            )
+        );
     }
 
     /**
      * @dev Compute the EIP-712 struct hash for an AcceptanceAttestation.
      */
-    function _hashAttestation(
-        AcceptanceAttestation calldata attestation
-    ) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            ACCEPTANCE_TYPEHASH,
-            attestation.intentHash,
-            attestation.expiry,
-            attestation.agentId
-        ));
+    function _hashAttestation(AcceptanceAttestation calldata attestation)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                ACCEPTANCE_TYPEHASH, attestation.intentHash, attestation.expiry, attestation.agentId
+            )
+        );
     }
 
     /**
      * @dev Compute the hash of a CoordinationPayload.
      */
-    function _hashPayload(
-        CoordinationPayload calldata payload
-    ) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            payload.version,
-            payload.coordinationType,
-            keccak256(abi.encodePacked(payload.participants)),
-            keccak256(payload.coordinationData)
-        ));
+    function _hashPayload(CoordinationPayload calldata payload) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                payload.version,
+                payload.coordinationType,
+                keccak256(abi.encodePacked(payload.participants)),
+                keccak256(payload.coordinationData)
+            )
+        );
     }
 
     /**
      * @dev Verify a signature from an agent (EOA or ERC-1271 contract).
      */
-    function _verifySignature(
-        address signer,
-        bytes32 digest,
-        bytes calldata signature
-    ) internal view returns (bool) {
+    function _verifySignature(address signer, bytes32 digest, bytes calldata signature)
+        internal
+        view
+        returns (bool)
+    {
         // Try EOA signature first
         if (signer.code.length == 0) {
             address recovered = digest.recover(signature);
@@ -413,9 +408,11 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     /**
      * @dev Get coordination state for internal use.
      */
-    function _getCoordination(
-        bytes32 intentHash
-    ) internal view returns (CoordinationState storage) {
+    function _getCoordination(bytes32 intentHash)
+        internal
+        view
+        returns (CoordinationState storage)
+    {
         return _coordinations[intentHash];
     }
 }

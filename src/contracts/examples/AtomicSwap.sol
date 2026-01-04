@@ -28,10 +28,10 @@ contract AtomicSwap is ERC8001 {
 
     /// @dev Swap terms encoded in coordinationData
     struct SwapTerms {
-        address tokenA;      // Token Alice is offering
-        uint256 amountA;     // Amount Alice is offering
-        address tokenB;      // Token Bob is offering  
-        uint256 amountB;     // Amount Bob is offering
+        address tokenA; // Token Alice is offering
+        uint256 amountA; // Amount Alice is offering
+        address tokenB; // Token Bob is offering
+        uint256 amountB; // Amount Bob is offering
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -106,13 +106,7 @@ contract AtomicSwap is ERC8001 {
         IERC20(terms.tokenB).safeTransferFrom(partyB, partyA, terms.amountB);
 
         emit SwapExecuted(
-            intentHash,
-            partyA,
-            partyB,
-            terms.tokenA,
-            terms.amountA,
-            terms.tokenB,
-            terms.amountB
+            intentHash, partyA, partyB, terms.tokenA, terms.amountA, terms.tokenB, terms.amountB
         );
     }
 
@@ -127,26 +121,25 @@ contract AtomicSwap is ERC8001 {
      * @param tokenB Token the proposer wants in return
      * @param amountB Amount the proposer wants in return
      */
-    function encodeSwapTerms(
-        address tokenA,
-        uint256 amountA,
-        address tokenB,
-        uint256 amountB
-    ) external pure returns (bytes memory) {
-        return abi.encode(SwapTerms({
-            tokenA: tokenA,
-            amountA: amountA,
-            tokenB: tokenB,
-            amountB: amountB
-        }));
+    function encodeSwapTerms(address tokenA, uint256 amountA, address tokenB, uint256 amountB)
+        external
+        pure
+        returns (bytes memory)
+    {
+        return
+            abi.encode(
+                SwapTerms({tokenA: tokenA, amountA: amountA, tokenB: tokenB, amountB: amountB})
+            );
     }
 
     /**
      * @notice Decode swap terms from coordinationData.
      */
-    function decodeSwapTerms(
-        bytes calldata coordinationData
-    ) external pure returns (SwapTerms memory) {
+    function decodeSwapTerms(bytes calldata coordinationData)
+        external
+        pure
+        returns (SwapTerms memory)
+    {
         return abi.decode(coordinationData, (SwapTerms));
     }
 
@@ -156,11 +149,11 @@ contract AtomicSwap is ERC8001 {
      * @param partyB Second party (acceptor)
      * @param terms The swap terms to check
      */
-    function checkAllowances(
-        address partyA,
-        address partyB,
-        SwapTerms calldata terms
-    ) external view returns (bool partyAReady, bool partyBReady) {
+    function checkAllowances(address partyA, address partyB, SwapTerms calldata terms)
+        external
+        view
+        returns (bool partyAReady, bool partyBReady)
+    {
         partyAReady = IERC20(terms.tokenA).allowance(partyA, address(this)) >= terms.amountA;
         partyBReady = IERC20(terms.tokenB).allowance(partyB, address(this)) >= terms.amountB;
     }

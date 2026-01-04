@@ -14,31 +14,31 @@ interface IBoundedAgentExecutor {
      * @dev Intent signed by an agent requesting execution.
      */
     struct BoundedIntent {
-        bytes32 payloadHash;    // Hash of the payload
-        uint64 expiry;          // When intent expires
-        uint64 nonce;           // Replay protection
-        address agentId;        // Agent signing the intent
-        uint256 policyEpoch;    // Policy version this was signed against
+        bytes32 payloadHash; // Hash of the payload
+        uint64 expiry; // When intent expires
+        uint64 nonce; // Replay protection
+        address agentId; // Agent signing the intent
+        uint256 policyEpoch; // Policy version this was signed against
     }
 
     /**
      * @dev Payload containing execution details.
      */
     struct BoundedPayload {
-        bytes32 policyRoot;     // Expected policy root
-        address target;         // Target contract/address
-        address asset;          // Token address (address(0) for ETH)
-        uint256 amount;         // Amount to transfer
-        bytes32 calldataHash;   // Hash of calldata (bytes32(0) if none)
+        bytes32 policyRoot; // Expected policy root
+        address target; // Target contract/address
+        address asset; // Token address (address(0) for ETH)
+        uint256 amount; // Amount to transfer
+        bytes32 calldataHash; // Hash of calldata (bytes32(0) if none)
     }
 
     /**
      * @dev Agent budget tracking.
      */
     struct AgentBudget {
-        uint256 dailyLimit;     // Maximum daily spend
-        uint256 spentToday;     // Amount spent in current period
-        uint256 periodStart;    // When current period started
+        uint256 dailyLimit; // Maximum daily spend
+        uint256 spentToday; // Amount spent in current period
+        uint256 periodStart; // When current period started
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -46,10 +46,7 @@ interface IBoundedAgentExecutor {
     // ═══════════════════════════════════════════════════════════════════════════
 
     event IntentExecuted(
-        address indexed agentId,
-        bytes32 indexed intentHash,
-        address target,
-        uint256 amount
+        address indexed agentId, bytes32 indexed intentHash, address target, uint256 amount
     );
 
     event PolicyQueued(bytes32 indexed newRoot, uint256 activationTime);

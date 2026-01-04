@@ -14,9 +14,11 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 
 contract MockUSDC is ERC20 {
     constructor() ERC20("USD Coin", "USDC") {}
+
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
     }
+
     function decimals() public pure override returns (uint8) {
         return 6;
     }
@@ -24,6 +26,7 @@ contract MockUSDC is ERC20 {
 
 contract MockWETH is ERC20 {
     constructor() ERC20("Wrapped Ether", "WETH") {}
+
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
     }
@@ -50,21 +53,20 @@ contract AtomicSwapTest is Test {
     // Alice and Bob
     uint256 alicePrivateKey = 0xA11CE;
     address alice = vm.addr(alicePrivateKey);
-    
+
     uint256 bobPrivateKey = 0xB0B;
     address bob = vm.addr(bobPrivateKey);
 
     // Swap amounts
-    uint256 constant USDC_AMOUNT = 100 * 1e6;      // 100 USDC
-    uint256 constant WETH_AMOUNT = 0.05 ether;     // 0.05 WETH
+    uint256 constant USDC_AMOUNT = 100 * 1e6; // 100 USDC
+    uint256 constant WETH_AMOUNT = 0.05 ether; // 0.05 WETH
 
     // EIP-712 constants
     bytes32 constant AGENT_INTENT_TYPEHASH = keccak256(
         "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,address[] participants)"
     );
-    bytes32 constant ACCEPTANCE_TYPEHASH = keccak256(
-        "AcceptanceAttestation(bytes32 intentHash,uint64 expiry,address agentId)"
-    );
+    bytes32 constant ACCEPTANCE_TYPEHASH =
+        keccak256("AcceptanceAttestation(bytes32 intentHash,uint64 expiry,address agentId)");
 
     function setUp() public {
         // Deploy contracts
@@ -98,13 +100,13 @@ contract AtomicSwapTest is Test {
         // ═══════════════════════════════════════════════════════════════════
         // STEP 1: ALICE PROPOSES THE SWAP
         // ═══════════════════════════════════════════════════════════════════
-        
+
         // Define the swap terms
         bytes memory coordinationData = swap.encodeSwapTerms(
-            address(usdc),   // Alice offers USDC
-            USDC_AMOUNT,     // 100 USDC
-            address(weth),   // Alice wants WETH
-            WETH_AMOUNT      // 0.05 WETH
+            address(usdc), // Alice offers USDC
+            USDC_AMOUNT, // 100 USDC
+            address(weth), // Alice wants WETH
+            WETH_AMOUNT // 0.05 WETH
         );
 
         // Define participants (Alice proposes, Bob must accept)
@@ -147,9 +149,7 @@ contract AtomicSwapTest is Test {
 
         // Bob creates an acceptance attestation
         IERC8001.AcceptanceAttestation memory acceptance = IERC8001.AcceptanceAttestation({
-            intentHash: intentHash,
-            expiry: uint64(block.timestamp + 1 hours),
-            agentId: bob
+            intentHash: intentHash, expiry: uint64(block.timestamp + 1 hours), agentId: bob
         });
 
         // Bob signs the acceptance
@@ -203,9 +203,8 @@ contract AtomicSwapTest is Test {
         participants[0] = alice;
         participants[1] = bob;
 
-        bytes memory coordinationData = swap.encodeSwapTerms(
-            address(usdc), USDC_AMOUNT, address(weth), WETH_AMOUNT
-        );
+        bytes memory coordinationData =
+            swap.encodeSwapTerms(address(usdc), USDC_AMOUNT, address(weth), WETH_AMOUNT);
 
         IERC8001.CoordinationPayload memory payload = IERC8001.CoordinationPayload({
             version: keccak256("V1"),
@@ -228,11 +227,9 @@ contract AtomicSwapTest is Test {
         bytes32 intentHash = swap.proposeCoordination(intent, payload, signature);
 
         // Bob never accepts - try to execute anyway
-        vm.expectRevert(abi.encodeWithSelector(
-            IERC8001.NotReady.selector,
-            intentHash,
-            IERC8001.Status.Proposed
-        ));
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC8001.NotReady.selector, intentHash, IERC8001.Status.Proposed)
+        );
         swap.executeCoordination(intentHash, payload, "");
 
         // Balances unchanged
@@ -251,9 +248,8 @@ contract AtomicSwapTest is Test {
         participants[0] = alice;
         participants[1] = bob;
 
-        bytes memory coordinationData = swap.encodeSwapTerms(
-            address(usdc), USDC_AMOUNT, address(weth), WETH_AMOUNT
-        );
+        bytes memory coordinationData =
+            swap.encodeSwapTerms(address(usdc), USDC_AMOUNT, address(weth), WETH_AMOUNT);
 
         IERC8001.CoordinationPayload memory payload = IERC8001.CoordinationPayload({
             version: keccak256("V1"),
@@ -279,7 +275,9 @@ contract AtomicSwapTest is Test {
         vm.prank(alice);
         swap.cancelCoordination(intentHash);
 
-        assertEq(uint256(swap.getCoordinationStatus(intentHash)), uint256(IERC8001.Status.Cancelled));
+        assertEq(
+            uint256(swap.getCoordinationStatus(intentHash)), uint256(IERC8001.Status.Cancelled)
+        );
         console2.log("Alice cancelled. Swap will never execute.");
     }
 
@@ -287,48 +285,57 @@ contract AtomicSwapTest is Test {
     // HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _hashPayload(IERC8001.CoordinationPayload memory payload) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            payload.version,
-            payload.coordinationType,
-            keccak256(abi.encodePacked(payload.participants)),
-            keccak256(payload.coordinationData)
-        ));
+    function _hashPayload(IERC8001.CoordinationPayload memory payload)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                payload.version,
+                payload.coordinationType,
+                keccak256(abi.encodePacked(payload.participants)),
+                keccak256(payload.coordinationData)
+            )
+        );
     }
 
     function _hashIntent(IERC8001.AgentIntent memory intent) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            AGENT_INTENT_TYPEHASH,
-            intent.payloadHash,
-            intent.expiry,
-            intent.nonce,
-            intent.agentId,
-            intent.coordinationType,
-            intent.coordinationValue,
-            keccak256(abi.encodePacked(intent.participants))
-        ));
+        return keccak256(
+            abi.encode(
+                AGENT_INTENT_TYPEHASH,
+                intent.payloadHash,
+                intent.expiry,
+                intent.nonce,
+                intent.agentId,
+                intent.coordinationType,
+                intent.coordinationValue,
+                keccak256(abi.encodePacked(intent.participants))
+            )
+        );
     }
 
-    function _signIntent(
-        IERC8001.AgentIntent memory intent,
-        uint256 privateKey
-    ) internal view returns (bytes memory) {
+    function _signIntent(IERC8001.AgentIntent memory intent, uint256 privateKey)
+        internal
+        view
+        returns (bytes memory)
+    {
         bytes32 structHash = _hashIntent(intent);
         bytes32 digest = MessageHashUtils.toTypedDataHash(swap.DOMAIN_SEPARATOR(), structHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
         return abi.encodePacked(r, s, v);
     }
 
-    function _signAcceptance(
-        IERC8001.AcceptanceAttestation memory attestation,
-        uint256 privateKey
-    ) internal view returns (bytes memory) {
-        bytes32 structHash = keccak256(abi.encode(
-            ACCEPTANCE_TYPEHASH,
-            attestation.intentHash,
-            attestation.expiry,
-            attestation.agentId
-        ));
+    function _signAcceptance(IERC8001.AcceptanceAttestation memory attestation, uint256 privateKey)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                ACCEPTANCE_TYPEHASH, attestation.intentHash, attestation.expiry, attestation.agentId
+            )
+        );
         bytes32 digest = MessageHashUtils.toTypedDataHash(swap.DOMAIN_SEPARATOR(), structHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
         return abi.encodePacked(r, s, v);

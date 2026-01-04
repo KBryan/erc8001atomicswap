@@ -58,17 +58,34 @@ contract DeployAtomicSwap is Script {
 
 /**
  * @title DeployAtomicSwapWithMocks
- * @dev Deploys AtomicSwap along with mock tokens for testing
+ * @dev Deploys AtomicSwap along with mock tokens for testing.
+ *      Funds AGENT_ONE and PLAYER_ONE with tokens for swap testing.
+ *
+ * Required environment variables:
+ *   PRIVATE_KEY  - Deployer private key
+ *   AGENT_ONE    - Address of first test account (will receive USDC)
+ *   PLAYER_ONE   - Address of second test account (will receive WETH)
  */
 contract DeployAtomicSwapWithMocks is Script {
+    // Token amounts for testing
+    uint256 constant USDC_AMOUNT = 1_000 * 1e6; // 1,000 USDC
+    uint256 constant WETH_AMOUNT = 1 * 1e18; // 1 WETH
+
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
+
+        // Load test accounts from environment
+        address agentOne = vm.envAddress("AGENT_ONE");
+        address playerOne = vm.envAddress("PLAYER_ONE");
 
         console2.log("==============================================");
         console2.log("Deploying AtomicSwap + Mock Tokens");
         console2.log("==============================================");
         console2.log("Deployer:", deployer);
+        console2.log("AGENT_ONE:", agentOne);
+        console2.log("PLAYER_ONE:", playerOne);
+        console2.log("");
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -79,22 +96,132 @@ contract DeployAtomicSwapWithMocks is Script {
         // Deploy swap contract
         AtomicSwap swap = new AtomicSwap();
 
-        // Mint some tokens to deployer for testing
-        mockUSDC.mint(deployer, 10_000 * 1e6);   // 10,000 USDC
-        mockWETH.mint(deployer, 10 * 1e18);      // 10 WETH
+        // ══════════════════════════════════════════════════════════════════
+        // FUND TEST ACCOUNTS
+        // ══════════════════════════════════════════════════════════════════
+
+        // AGENT_ONE gets USDC (will offer USDC in swaps)
+        mockUSDC.mint(agentOne, USDC_AMOUNT);
+
+        // PLAYER_ONE gets WETH (will offer WETH in swaps)
+        mockWETH.mint(playerOne, WETH_AMOUNT);
+
+        // Also give deployer some of each for flexibility
+        mockUSDC.mint(deployer, USDC_AMOUNT);
+        mockWETH.mint(deployer, WETH_AMOUNT);
+
+        vm.stopBroadcast();
+
+        // ══════════════════════════════════════════════════════════════════
+        // OUTPUT SUMMARY
+        // ══════════════════════════════════════════════════════════════════
+
+        console2.log("==============================================");
+        console2.log("Deployment Complete!");
+        console2.log("==============================================");
+        console2.log("");
+        console2.log("Contracts:");
+        console2.log("  AtomicSwap:", address(swap));
+        console2.log("  Mock USDC:", address(mockUSDC));
+        console2.log("  Mock WETH:", address(mockWETH));
+        console2.log("");
+        console2.log("AGENT_ONE balances:");
+        console2.log("  mUSDC:", mockUSDC.balanceOf(agentOne));
+        console2.log("  mWETH:", mockWETH.balanceOf(agentOne));
+        console2.log("");
+        console2.log("PLAYER_ONE balances:");
+        console2.log("  mUSDC:", mockUSDC.balanceOf(playerOne));
+        console2.log("  mWETH:", mockWETH.balanceOf(playerOne));
+        console2.log("");
+        console2.log("==============================================");
+        console2.log("FRONTEND CONFIG (copy these):");
+        console2.log("==============================================");
+        console2.log("");
+        console2.log("const ATOMIC_SWAP = '", address(swap), "';");
+        console2.log("const MOCK_USDC = '", address(mockUSDC), "';");
+        console2.log("const MOCK_WETH = '", address(mockWETH), "';");
+        console2.log("");
+        console2.log("==============================================");
+        console2.log("NEXT STEPS:");
+        console2.log("==============================================");
+        console2.log("1. AGENT_ONE must approve AtomicSwap for USDC:");
+        console2.log("   mockUSDC.approve(", address(swap), ", amount)");
+        console2.log("");
+        console2.log("2. PLAYER_ONE must approve AtomicSwap for WETH:");
+        console2.log("   mockWETH.approve(", address(swap), ", amount)");
+        console2.log("");
+        console2.log("3. Test a swap:");
+        console2.log("   - AGENT_ONE proposes: 100 USDC for 0.1 WETH");
+        console2.log("   - PLAYER_ONE accepts");
+        console2.log("   - Anyone executes");
+    }
+}
+
+/**
+ * @title DeployMockTokensOnly
+ * @dev Deploys mock tokens and funds test accounts.
+ *      Use this when AtomicSwap is already deployed.
+ *
+ * Usage:
+ *   ATOMIC_SWAP=0xD25FaF692736b74A674c8052F904b5C77f9cb2Ed \
+ *   forge script script/DeployAtomicSwap.s.sol:DeployMockTokensOnly \
+ *     --rpc-url base_sepolia --broadcast -vvvv
+ *
+ * Required environment variables:
+ *   PRIVATE_KEY  - Deployer private key
+ *   AGENT_ONE    - Address of first test account (will receive USDC)
+ *   PLAYER_ONE   - Address of second test account (will receive WETH)
+ *   ATOMIC_SWAP  - Address of already-deployed AtomicSwap contract
+ */
+contract DeployMockTokensOnly is Script {
+    uint256 constant USDC_AMOUNT = 1_000 * 1e6;
+    uint256 constant WETH_AMOUNT = 1 * 1e18;
+
+    function run() public {
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address deployer = vm.addr(deployerPrivateKey);
+        address agentOne = vm.envAddress("AGENT_ONE");
+        address playerOne = vm.envAddress("PLAYER_ONE");
+        address atomicSwap = vm.envAddress("ATOMIC_SWAP");
+
+        console2.log("==============================================");
+        console2.log("Deploying Mock Tokens Only");
+        console2.log("==============================================");
+        console2.log("Deployer:", deployer);
+        console2.log("AGENT_ONE:", agentOne);
+        console2.log("PLAYER_ONE:", playerOne);
+        console2.log("AtomicSwap:", atomicSwap);
+        console2.log("");
+
+        vm.startBroadcast(deployerPrivateKey);
+
+        MockERC20 mockUSDC = new MockERC20("Mock USDC", "mUSDC", 6);
+        MockERC20 mockWETH = new MockERC20("Mock WETH", "mWETH", 18);
+
+        // Fund accounts
+        mockUSDC.mint(agentOne, USDC_AMOUNT);
+        mockWETH.mint(playerOne, WETH_AMOUNT);
+        mockUSDC.mint(deployer, USDC_AMOUNT);
+        mockWETH.mint(deployer, WETH_AMOUNT);
 
         vm.stopBroadcast();
 
         console2.log("==============================================");
         console2.log("Deployment Complete!");
         console2.log("==============================================");
-        console2.log("AtomicSwap:", address(swap));
-        console2.log("Mock USDC:", address(mockUSDC));
-        console2.log("Mock WETH:", address(mockWETH));
         console2.log("");
-        console2.log("Deployer balances:");
-        console2.log("  mUSDC:", mockUSDC.balanceOf(deployer) / 1e6);
-        console2.log("  mWETH:", mockWETH.balanceOf(deployer) / 1e18);
+        console2.log("FRONTEND CONFIG (copy-paste ready):");
+        console2.log("==============================================");
+        console2.log("");
+        console2.log("const ATOMIC_SWAP =", atomicSwap);
+        console2.log("const MOCK_USDC =", address(mockUSDC));
+        console2.log("const MOCK_WETH =", address(mockWETH));
+        console2.log("");
+        console2.log("AGENT_ONE:", agentOne);
+        console2.log("  mUSDC balance:", USDC_AMOUNT);
+        console2.log("");
+        console2.log("PLAYER_ONE:", playerOne);
+        console2.log("  mWETH balance:", WETH_AMOUNT);
     }
 }
 
@@ -106,7 +233,7 @@ contract MockERC20 {
     string public symbol;
     uint8 public decimals;
     uint256 public totalSupply;
-    
+
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 

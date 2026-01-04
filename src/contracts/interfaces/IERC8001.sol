@@ -21,11 +21,11 @@ interface IERC8001 {
      * @dev Coordination lifecycle status.
      */
     enum Status {
-        None,       // 0: Intent does not exist
-        Proposed,   // 1: Intent proposed, awaiting acceptances
-        Ready,      // 2: All participants accepted, executable
-        Executed,   // 3: Coordination executed
-        Cancelled   // 4: Coordination cancelled
+        None, // 0: Intent does not exist
+        Proposed, // 1: Intent proposed, awaiting acceptances
+        Ready, // 2: All participants accepted, executable
+        Executed, // 3: Coordination executed
+        Cancelled // 4: Coordination cancelled
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -123,20 +123,14 @@ interface IERC8001 {
      * @param intentHash The executed coordination
      * @param executor Address that triggered execution
      */
-    event CoordinationExecuted(
-        bytes32 indexed intentHash,
-        address indexed executor
-    );
+    event CoordinationExecuted(bytes32 indexed intentHash, address indexed executor);
 
     /**
      * @dev Emitted when a coordination is cancelled.
      * @param intentHash The cancelled coordination
      * @param canceller Address that cancelled
      */
-    event CoordinationCancelled(
-        bytes32 indexed intentHash,
-        address indexed canceller
-    );
+    event CoordinationCancelled(bytes32 indexed intentHash, address indexed canceller);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
@@ -240,9 +234,7 @@ interface IERC8001 {
      * @param intentHash The coordination to query
      * @return status Current lifecycle status
      */
-    function getCoordinationStatus(
-        bytes32 intentHash
-    ) external view returns (Status status);
+    function getCoordinationStatus(bytes32 intentHash) external view returns (Status status);
 
     /**
      * @notice Get detailed coordination state.
@@ -253,15 +245,16 @@ interface IERC8001 {
      * @return accepted Participants who have accepted
      * @return expiry Intent expiration timestamp
      */
-    function getCoordination(
-        bytes32 intentHash
-    ) external view returns (
-        Status status,
-        bytes32 payloadHash,
-        address[] memory participants,
-        address[] memory accepted,
-        uint64 expiry
-    );
+    function getCoordination(bytes32 intentHash)
+        external
+        view
+        returns (
+            Status status,
+            bytes32 payloadHash,
+            address[] memory participants,
+            address[] memory accepted,
+            uint64 expiry
+        );
 
     /**
      * @notice Get the current nonce for an agent.
@@ -276,10 +269,10 @@ interface IERC8001 {
      * @param participant The participant to check
      * @return hasAccepted True if the participant has accepted
      */
-    function hasAccepted(
-        bytes32 intentHash,
-        address participant
-    ) external view returns (bool hasAccepted);
+    function hasAccepted(bytes32 intentHash, address participant)
+        external
+        view
+        returns (bool hasAccepted);
 
     /**
      * @notice Get the EIP-712 domain separator.

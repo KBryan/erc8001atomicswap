@@ -79,11 +79,10 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
      * @param _guardian Address that can veto policy updates
      * @param _owner Address that can manage budgets and queue policies
      */
-    constructor(
-        bytes32 initialPolicyRoot,
-        address _guardian,
-        address _owner
-    ) EIP712("BoundedAgentExecutor", "1") Ownable(_owner) {
+    constructor(bytes32 initialPolicyRoot, address _guardian, address _owner)
+        EIP712("BoundedAgentExecutor", "1")
+        Ownable(_owner)
+    {
         policyRoot = initialPolicyRoot;
         policyEpoch = 1;
         guardian = _guardian;
@@ -103,7 +102,7 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
     ) external payable override {
         // Validate intent and get intentHash (scoped to free stack slots)
         bytes32 intentHash = _validateIntent(intent, payload, callData, signature);
-        
+
         // Verify policy proof
         _verifyPolicyProof(payload, policyProof);
 
@@ -169,10 +168,10 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
     /**
      * @dev Verify the policy Merkle proof.
      */
-    function _verifyPolicyProof(
-        BoundedPayload calldata payload,
-        bytes32[] calldata policyProof
-    ) internal view {
+    function _verifyPolicyProof(BoundedPayload calldata payload, bytes32[] calldata policyProof)
+        internal
+        view
+    {
         bytes32 leaf = _computePolicyLeaf(payload.target, payload.asset, payload.amount);
         if (!MerkleProof.verify(policyProof, policyRoot, leaf)) {
             revert InvalidPolicyProof();
@@ -182,10 +181,7 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
     /**
      * @dev Execute token transfer and/or call.
      */
-    function _executeOperations(
-        BoundedPayload calldata payload,
-        bytes calldata callData
-    ) internal {
+    function _executeOperations(BoundedPayload calldata payload, bytes calldata callData) internal {
         // Execute ERC20 transfer
         if (payload.asset != address(0) && payload.amount > 0) {
             IERC20(payload.asset).safeTransfer(payload.target, payload.amount);
@@ -211,7 +207,7 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
     function queuePolicyUpdate(bytes32 newRoot) external override onlyOwner {
         queuedRoot = newRoot;
         queuedActivationTime = block.timestamp + TIMELOCK_DURATION;
-        
+
         emit PolicyQueued(newRoot, queuedActivationTime);
     }
 
@@ -226,7 +222,7 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
 
         policyRoot = queuedRoot;
         policyEpoch++;
-        
+
         emit PolicyActivated(queuedRoot, policyEpoch);
 
         // Clear queue
@@ -264,19 +260,14 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IBoundedAgentExecutor
-    function setAgentBudget(
-        address agentId,
-        uint256 dailyLimit
-    ) external override onlyOwner {
+    function setAgentBudget(address agentId, uint256 dailyLimit) external override onlyOwner {
         _agentBudgets[agentId].dailyLimit = dailyLimit;
-        
+
         emit AgentBudgetSet(agentId, dailyLimit);
     }
 
     /// @inheritdoc IBoundedAgentExecutor
-    function getAgentBudget(
-        address agentId
-    ) external view override returns (AgentBudget memory) {
+    function getAgentBudget(address agentId) external view override returns (AgentBudget memory) {
         return _agentBudgets[agentId];
     }
 
@@ -285,10 +276,12 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IBoundedAgentExecutor
-    function getQueuedPolicy() external view override returns (
-        bytes32 root,
-        uint256 activationTime
-    ) {
+    function getQueuedPolicy()
+        external
+        view
+        override
+        returns (bytes32 root, uint256 activationTime)
+    {
         return (queuedRoot, queuedActivationTime);
     }
 
@@ -315,16 +308,16 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
      */
     function getRemainingBudget(address agentId) external view returns (uint256) {
         AgentBudget storage budget = _agentBudgets[agentId];
-        
+
         // Check if period has reset
         if (block.timestamp >= budget.periodStart + DAY) {
             return budget.dailyLimit;
         }
-        
+
         if (budget.spentToday >= budget.dailyLimit) {
             return 0;
         }
-        
+
         return budget.dailyLimit - budget.spentToday;
     }
 
@@ -337,30 +330,30 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
      */
     function _checkAndUpdateBudget(address agentId, uint256 amount) internal {
         AgentBudget storage budget = _agentBudgets[agentId];
-        
+
         // Reset period if new day
         if (block.timestamp >= budget.periodStart + DAY) {
             budget.spentToday = 0;
             budget.periodStart = block.timestamp;
         }
-        
+
         // Check limit
         uint256 newSpent = budget.spentToday + amount;
         if (newSpent > budget.dailyLimit) {
             revert BudgetExceeded(budget.dailyLimit, amount, budget.spentToday);
         }
-        
+
         budget.spentToday = newSpent;
     }
 
     /**
      * @dev Compute policy leaf hash.
      */
-    function _computePolicyLeaf(
-        address target,
-        address asset,
-        uint256 amount
-    ) internal pure returns (bytes32) {
+    function _computePolicyLeaf(address target, address asset, uint256 amount)
+        internal
+        pure
+        returns (bytes32)
+    {
         return keccak256(abi.encode(POLICY_LEAF_DOMAIN, target, asset, amount));
     }
 
@@ -368,27 +361,31 @@ contract BoundedAgentExecutor is IBoundedAgentExecutor, EIP712, Ownable {
      * @dev Hash BoundedIntent for EIP-712.
      */
     function _hashIntent(BoundedIntent calldata intent) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            BOUNDED_INTENT_TYPEHASH,
-            intent.payloadHash,
-            intent.expiry,
-            intent.nonce,
-            intent.agentId,
-            intent.policyEpoch
-        ));
+        return keccak256(
+            abi.encode(
+                BOUNDED_INTENT_TYPEHASH,
+                intent.payloadHash,
+                intent.expiry,
+                intent.nonce,
+                intent.agentId,
+                intent.policyEpoch
+            )
+        );
     }
 
     /**
      * @dev Hash BoundedPayload.
      */
     function _hashPayload(BoundedPayload calldata payload) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            payload.policyRoot,
-            payload.target,
-            payload.asset,
-            payload.amount,
-            payload.calldataHash
-        ));
+        return keccak256(
+            abi.encode(
+                payload.policyRoot,
+                payload.target,
+                payload.asset,
+                payload.amount,
+                payload.calldataHash
+            )
+        );
     }
 
     /**
