@@ -12,3 +12,9 @@ docs/
 
 # Dotenv file
 .env
+.idea/erc8001atomicswap.iml
+.idea/inspectionProfiles/Project_Default.xml
+.idea/misc.xml
+.idea/modules.xml
+.idea/prettier.xml
+.idea/vcs.xml

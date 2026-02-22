@@ -15,6 +15,8 @@ import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
  * - Accept: Each participant signs an acceptance attestation
  * - Execute: Once all participants accept, anyone can trigger execution
  *
+ * EIP-712 Domain: {name: "ERC-8001", version: "1", chainId, verifyingContract}
+ *
  * Execution logic is left to inheriting contracts via the `_executeCoordination` hook.
  *
  * See https://eips.ethereum.org/EIPS/eip-8001
@@ -26,14 +28,15 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     // CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev EIP-712 typehash for AgentIntent
+    /// @dev EIP-712 typehash for AgentIntent (as defined in the spec)
     bytes32 public constant AGENT_INTENT_TYPEHASH = keccak256(
         "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,address[] participants)"
     );
 
-    /// @dev EIP-712 typehash for AcceptanceAttestation
-    bytes32 public constant ACCEPTANCE_TYPEHASH =
-        keccak256("AcceptanceAttestation(bytes32 intentHash,uint64 expiry,address agentId)");
+    /// @dev EIP-712 typehash for AcceptanceAttestation (as defined in the spec)
+    bytes32 public constant ACCEPTANCE_TYPEHASH = keccak256(
+        "AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)"
+    );
 
     /// @dev EIP-1271 magic value for valid signatures
     bytes4 private constant EIP1271_MAGIC = 0x1626ba7e;
@@ -42,6 +45,13 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     // STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev Per-participant acceptance record
+    struct AcceptanceRecord {
+        bool accepted;
+        uint64 expiry;       // When this acceptance expires
+        uint64 nonce;        // Acceptance-level nonce (optional per spec)
+    }
+
     /// @dev Coordination state by intent hash
     struct CoordinationState {
         Status status;
@@ -49,14 +59,14 @@ abstract contract ERC8001 is IERC8001, EIP712 {
         address proposer;
         uint64 expiry;
         address[] participants;
-        mapping(address => bool) accepted;
+        mapping(address => AcceptanceRecord) acceptances;
         uint256 acceptedCount;
     }
 
     /// @dev Intent hash => coordination state
     mapping(bytes32 => CoordinationState) internal _coordinations;
 
-    /// @dev Agent address => current nonce
+    /// @dev Agent address => current nonce (for intent replay protection)
     mapping(address => uint64) internal _agentNonces;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -64,11 +74,9 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @dev Initializes the EIP-712 domain.
-     * @param name The protocol name for EIP-712 domain
-     * @param version The protocol version for EIP-712 domain
+     * @dev Initializes the EIP-712 domain with hardcoded ERC-8001 values.
      */
-    constructor(string memory name, string memory version) EIP712(name, version) {}
+    constructor() EIP712("ERC-8001", "1") {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     // EXTERNAL FUNCTIONS
@@ -77,38 +85,53 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     /// @inheritdoc IERC8001
     function proposeCoordination(
         AgentIntent calldata intent,
-        CoordinationPayload calldata payload,
-        bytes calldata signature
+        bytes calldata signature,
+        CoordinationPayload calldata payload
     ) external virtual returns (bytes32 intentHash) {
         // Validate expiry
         if (intent.expiry <= block.timestamp) {
-            revert IntentExpired(intent.expiry, uint64(block.timestamp));
+            revert ERC8001_ExpiredIntent();
         }
 
         // Validate nonce
         uint64 currentNonce = _agentNonces[intent.agentId];
         if (intent.nonce <= currentNonce) {
-            revert NonceTooLow(intent.nonce, currentNonce + 1);
+            revert ERC8001_NonceTooLow();
         }
 
-        // Compute intent hash
+        // Validate participants are strictly ascending and unique
+        _validateParticipantsCanonical(intent.participants);
+
+        // Validate agentId is in participants list
+        bool agentIsParticipant = false;
+        for (uint256 i = 0; i < intent.participants.length; i++) {
+            if (intent.participants[i] == intent.agentId) {
+                agentIsParticipant = true;
+                break;
+            }
+        }
+        if (!agentIsParticipant) {
+            revert ERC8001_NotParticipant();
+        }
+
+        // Compute intent struct hash (as defined in the spec)
         intentHash = _hashIntent(intent);
 
         // Check intent doesn't already exist
         if (_coordinations[intentHash].status != Status.None) {
-            revert IntentAlreadyExists(intentHash);
+            revert ERC8001_DuplicateAcceptance();
         }
 
         // Verify payload hash matches
         bytes32 computedPayloadHash = _hashPayload(payload);
         if (intent.payloadHash != computedPayloadHash) {
-            revert PayloadMismatch(intent.payloadHash, computedPayloadHash);
+            revert ERC8001_PayloadHashMismatch();
         }
 
         // Verify signature
         bytes32 digest = _hashTypedDataV4(intentHash);
         if (!_verifySignature(intent.agentId, digest, signature)) {
-            revert InvalidSignature(intent.agentId, address(0));
+            revert ERC8001_BadSignature();
         }
 
         // Update nonce
@@ -125,86 +148,112 @@ abstract contract ERC8001 is IERC8001, EIP712 {
         // Proposer auto-accepts if they're a participant
         for (uint256 i = 0; i < intent.participants.length; i++) {
             if (intent.participants[i] == intent.agentId) {
-                coord.accepted[intent.agentId] = true;
+                coord.acceptances[intent.agentId].accepted = true;
+                coord.acceptances[intent.agentId].expiry = intent.expiry; // Use intent expiry as acceptance expiry
                 coord.acceptedCount = 1;
                 break;
             }
         }
 
         emit CoordinationProposed(
-            intentHash, intent.agentId, intent.coordinationType, intent.participants, intent.expiry
+            intentHash,
+            intent.agentId,
+            intent.coordinationType,
+            intent.participants.length,
+            intent.coordinationValue
         );
 
         // Check if ready (single participant case)
         if (coord.acceptedCount == coord.participants.length) {
             coord.status = Status.Ready;
-            emit CoordinationReady(intentHash);
         }
 
         return intentHash;
     }
 
     /// @inheritdoc IERC8001
-    function acceptCoordination(
-        bytes32 intentHash,
-        AcceptanceAttestation calldata attestation,
-        bytes calldata signature
-    ) external virtual {
+    function acceptCoordination(bytes32 intentHash, AcceptanceAttestation calldata attestation)
+        external
+        virtual
+        returns (bool allAccepted)
+    {
         CoordinationState storage coord = _coordinations[intentHash];
 
         // Validate coordination exists and is proposed
         if (coord.status == Status.None) {
-            revert IntentNotFound(intentHash);
+            revert ERC8001_NotReady();
         }
-        if (coord.status != Status.Proposed) {
-            revert NotReady(intentHash, coord.status);
+        if (coord.status != Status.Proposed && coord.status != Status.Ready) {
+            revert ERC8001_NotReady();
         }
 
-        // Validate acceptance attestation
-        if (attestation.intentHash != intentHash) {
-            revert PayloadMismatch(intentHash, attestation.intentHash);
+        // Validate intent not expired
+        if (coord.expiry <= block.timestamp) {
+            revert ERC8001_ExpiredIntent();
         }
+
+        // Validate acceptance attestation matches intent
+        if (attestation.intentHash != intentHash) {
+            revert ERC8001_PayloadHashMismatch();
+        }
+
+        // Validate acceptance expiry
         if (attestation.expiry <= block.timestamp) {
-            revert AcceptanceExpired(attestation.expiry, uint64(block.timestamp));
+            revert ERC8001_ExpiredAcceptance(attestation.participant);
+        }
+
+        // The caller must be the participant
+        if (msg.sender != attestation.participant) {
+            revert ERC8001_NotParticipant();
         }
 
         // Check participant is required
         bool isParticipant = false;
         for (uint256 i = 0; i < coord.participants.length; i++) {
-            if (coord.participants[i] == attestation.agentId) {
+            if (coord.participants[i] == attestation.participant) {
                 isParticipant = true;
                 break;
             }
         }
         if (!isParticipant) {
-            revert NotParticipant(intentHash, attestation.agentId);
+            revert ERC8001_NotParticipant();
         }
 
         // Check not already accepted
-        if (coord.accepted[attestation.agentId]) {
-            revert AlreadyAccepted(intentHash, attestation.agentId);
+        if (coord.acceptances[attestation.participant].accepted) {
+            revert ERC8001_DuplicateAcceptance();
         }
 
-        // Verify signature
-        bytes32 attestationHash = _hashAttestation(attestation);
-        bytes32 digest = _hashTypedDataV4(attestationHash);
-        if (!_verifySignature(attestation.agentId, digest, signature)) {
-            revert InvalidSignature(attestation.agentId, address(0));
+        // Verify signature (from the attestation)
+        bytes32 attestationStructHash = _hashAttestation(attestation);
+        bytes32 digest = _hashTypedDataV4(attestationStructHash);
+        if (!_verifySignature(attestation.participant, digest, attestation.signature)) {
+            revert ERC8001_BadSignature();
         }
 
         // Record acceptance
-        coord.accepted[attestation.agentId] = true;
+        coord.acceptances[attestation.participant].accepted = true;
+        coord.acceptances[attestation.participant].expiry = attestation.expiry;
+        coord.acceptances[attestation.participant].nonce = attestation.nonce;
         coord.acceptedCount++;
 
+        bytes32 acceptanceHash = keccak256(abi.encode(attestation));
+
         emit CoordinationAccepted(
-            intentHash, attestation.agentId, coord.acceptedCount, coord.participants.length
+            intentHash,
+            attestation.participant,
+            acceptanceHash,
+            coord.acceptedCount,
+            coord.participants.length
         );
 
         // Check if all participants have accepted
         if (coord.acceptedCount == coord.participants.length) {
             coord.status = Status.Ready;
-            emit CoordinationReady(intentHash);
+            return true;
         }
+
+        return false;
     }
 
     /// @inheritdoc IERC8001
@@ -212,51 +261,64 @@ abstract contract ERC8001 is IERC8001, EIP712 {
         bytes32 intentHash,
         CoordinationPayload calldata payload,
         bytes calldata executionData
-    ) external virtual {
+    ) external virtual returns (bool success, bytes memory result) {
         CoordinationState storage coord = _coordinations[intentHash];
 
-        // Validate status
+        // Validate status is Ready
         if (coord.status != Status.Ready) {
-            revert NotReady(intentHash, coord.status);
+            revert ERC8001_NotReady();
         }
 
-        // Validate not expired
+        // Validate intent not expired
         if (coord.expiry <= block.timestamp) {
-            revert IntentExpired(coord.expiry, uint64(block.timestamp));
+            revert ERC8001_ExpiredIntent();
+        }
+
+        // Validate all acceptances have not expired
+        for (uint256 i = 0; i < coord.participants.length; i++) {
+            address participant = coord.participants[i];
+            if (coord.acceptances[participant].expiry <= block.timestamp) {
+                revert ERC8001_ExpiredAcceptance(participant);
+            }
         }
 
         // Verify payload matches
         bytes32 computedPayloadHash = _hashPayload(payload);
         if (coord.payloadHash != computedPayloadHash) {
-            revert PayloadMismatch(coord.payloadHash, computedPayloadHash);
+            revert ERC8001_PayloadHashMismatch();
         }
 
         // Update status before execution (reentrancy protection)
         coord.status = Status.Executed;
 
         // Execute application-specific logic
-        _executeCoordination(intentHash, payload, executionData);
+        uint256 gasBefore = gasleft();
+        (success, result) = _executeCoordinationHook(intentHash, payload, executionData);
+        uint256 gasUsed = gasBefore - gasleft();
 
-        emit CoordinationExecuted(intentHash, msg.sender);
+        emit CoordinationExecuted(intentHash, msg.sender, success, gasUsed, result);
     }
 
     /// @inheritdoc IERC8001
-    function cancelCoordination(bytes32 intentHash) external virtual {
+    function cancelCoordination(bytes32 intentHash, string calldata reason) external virtual {
         CoordinationState storage coord = _coordinations[intentHash];
 
         if (coord.status == Status.None) {
-            revert IntentNotFound(intentHash);
+            revert ERC8001_NotReady();
         }
         if (coord.status == Status.Executed || coord.status == Status.Cancelled) {
-            revert NotReady(intentHash, coord.status);
+            revert ERC8001_NotReady();
         }
-        if (msg.sender != coord.proposer) {
-            revert NotAuthorizedToCancel(intentHash, msg.sender);
+
+        // Before expiry: only proposer can cancel
+        // After expiry: anyone can cancel
+        if (coord.expiry > block.timestamp && msg.sender != coord.proposer) {
+            revert ERC8001_NotProposer();
         }
 
         coord.status = Status.Cancelled;
 
-        emit CoordinationCancelled(intentHash, msg.sender);
+        emit CoordinationCancelled(intentHash, msg.sender, reason, uint8(Status.Cancelled));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -264,54 +326,71 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IERC8001
-    function getCoordinationStatus(bytes32 intentHash) external view virtual returns (Status) {
-        return _coordinations[intentHash].status;
-    }
-
-    /// @inheritdoc IERC8001
-    function getCoordination(bytes32 intentHash)
+    function getCoordinationStatus(bytes32 intentHash)
         external
         view
         virtual
         returns (
             Status status,
-            bytes32 payloadHash,
+            address proposer,
             address[] memory participants,
-            address[] memory accepted,
-            uint64 expiry
+            address[] memory acceptedBy,
+            uint256 expiry
         )
     {
         CoordinationState storage coord = _coordinations[intentHash];
 
+        // Compute dynamic status
         status = coord.status;
-        payloadHash = coord.payloadHash;
+        if (status == Status.Proposed || status == Status.Ready) {
+            if (block.timestamp >= coord.expiry) {
+                status = Status.Expired;
+            }
+        }
+
+        proposer = coord.proposer;
         participants = coord.participants;
         expiry = coord.expiry;
 
-        // Build accepted array
-        uint256 count = coord.acceptedCount;
-        accepted = new address[](count);
+        // Build acceptedBy array
+        uint256 acceptedCount = 0;
+        for (uint256 i = 0; i < coord.participants.length; i++) {
+            if (coord.acceptances[coord.participants[i]].accepted) {
+                acceptedCount++;
+            }
+        }
+        acceptedBy = new address[](acceptedCount);
         uint256 idx = 0;
-        for (uint256 i = 0; i < coord.participants.length && idx < count; i++) {
-            if (coord.accepted[coord.participants[i]]) {
-                accepted[idx++] = coord.participants[i];
+        for (uint256 i = 0; i < coord.participants.length && idx < acceptedCount; i++) {
+            if (coord.acceptances[coord.participants[i]].accepted) {
+                acceptedBy[idx++] = coord.participants[i];
             }
         }
     }
 
     /// @inheritdoc IERC8001
-    function getAgentNonce(address agentId) external view virtual returns (uint64) {
-        return _agentNonces[agentId];
+    function getRequiredAcceptances(bytes32 intentHash) external view virtual returns (uint256 count) {
+        return _coordinations[intentHash].participants.length;
     }
 
     /// @inheritdoc IERC8001
+    function getAgentNonce(address agent) external view virtual returns (uint64) {
+        return _agentNonces[agent];
+    }
+
+    /**
+     * @notice Check if a participant has accepted a coordination.
+     * @param intentHash  The coordination to check
+     * @param participant The participant to check
+     * @return hasAccepted True if the participant has accepted
+     */
     function hasAccepted(bytes32 intentHash, address participant)
         external
         view
         virtual
         returns (bool)
     {
-        return _coordinations[intentHash].accepted[participant];
+        return _coordinations[intentHash].acceptances[participant].accepted;
     }
 
     /// @inheritdoc IERC8001
@@ -326,18 +405,21 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     /**
      * @dev Hook for application-specific execution logic.
      *      MUST be implemented by inheriting contracts.
-     * @param intentHash The coordination being executed
-     * @param payload The coordination payload
+     * @param intentHash    The coordination being executed
+     * @param payload       The coordination payload
      * @param executionData Optional execution-specific data
+     * @return success Whether execution succeeded
+     * @return result  Return data from execution
      */
-    function _executeCoordination(
+    function _executeCoordinationHook(
         bytes32 intentHash,
         CoordinationPayload calldata payload,
         bytes calldata executionData
-    ) internal virtual;
+    ) internal virtual returns (bool success, bytes memory result);
 
     /**
      * @dev Compute the EIP-712 struct hash for an AgentIntent.
+     *      Per spec: keccak256(abi.encode(AGENT_INTENT_TYPEHASH, ...))
      */
     function _hashIntent(AgentIntent calldata intent) internal pure returns (bytes32) {
         return keccak256(
@@ -356,6 +438,8 @@ abstract contract ERC8001 is IERC8001, EIP712 {
 
     /**
      * @dev Compute the EIP-712 struct hash for an AcceptanceAttestation.
+     *      Per spec: keccak256(abi.encode(ACCEPTANCE_TYPEHASH, ...))
+     *      Note: signature is NOT part of the hash (it's inside the struct but not signed over)
      */
     function _hashAttestation(AcceptanceAttestation calldata attestation)
         internal
@@ -364,45 +448,72 @@ abstract contract ERC8001 is IERC8001, EIP712 {
     {
         return keccak256(
             abi.encode(
-                ACCEPTANCE_TYPEHASH, attestation.intentHash, attestation.expiry, attestation.agentId
+                ACCEPTANCE_TYPEHASH,
+                attestation.intentHash,
+                attestation.participant,
+                attestation.nonce,
+                attestation.expiry,
+                attestation.conditionsHash
             )
         );
     }
 
     /**
      * @dev Compute the hash of a CoordinationPayload.
+     *      Per spec: hash of all fields including metadata
      */
     function _hashPayload(CoordinationPayload calldata payload) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
                 payload.version,
                 payload.coordinationType,
-                keccak256(abi.encodePacked(payload.participants)),
-                keccak256(payload.coordinationData)
+                keccak256(payload.coordinationData),
+                payload.conditionsHash,
+                payload.timestamp,
+                keccak256(payload.metadata)
             )
         );
     }
 
     /**
+     * @dev Validate that participants array is strictly ascending and unique.
+     *      Per spec: participants MUST be unique and strictly ascending by uint160(address).
+     */
+    function _validateParticipantsCanonical(address[] calldata participants) internal pure {
+        if (participants.length == 0) {
+            revert ERC8001_ParticipantsNotCanonical();
+        }
+        for (uint256 i = 1; i < participants.length; i++) {
+            if (uint160(participants[i]) <= uint160(participants[i - 1])) {
+                revert ERC8001_ParticipantsNotCanonical();
+            }
+        }
+    }
+
+    /**
      * @dev Verify a signature from an agent (EOA or ERC-1271 contract).
+     * @param signer    Expected signer address
+     * @param digest    EIP-712 digest to verify
+     * @param signature Signature bytes (65 or 64 bytes for ECDSA, arbitrary for ERC-1271)
+     * @return valid    True if signature is valid
      */
     function _verifySignature(address signer, bytes32 digest, bytes calldata signature)
         internal
         view
         returns (bool)
     {
-        // Try EOA signature first
-        if (signer.code.length == 0) {
-            address recovered = digest.recover(signature);
-            return recovered == signer;
+        // Contract signer - use ERC-1271
+        if (signer.code.length > 0) {
+            try IERC1271(signer).isValidSignature(digest, signature) returns (bytes4 magic) {
+                return magic == EIP1271_MAGIC;
+            } catch {
+                return false;
+            }
         }
 
-        // Contract signer - use ERC-1271
-        try IERC1271(signer).isValidSignature(digest, signature) returns (bytes4 magic) {
-            return magic == EIP1271_MAGIC;
-        } catch {
-            return false;
-        }
+        // EOA signature - use ECDSA recovery
+        address recovered = digest.recover(signature);
+        return recovered == signer;
     }
 
     /**

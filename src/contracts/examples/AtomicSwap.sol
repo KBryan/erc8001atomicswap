@@ -14,7 +14,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * 1. Alice wants to swap 100 USDC for 0.05 WETH from Bob
  * 2. Alice proposes the swap (signs an intent specifying the terms)
  * 3. Bob reviews and accepts (signs an acceptance)
- * 4. Anyone can execute → tokens swap atomically
+ * 4. Anyone can execute -> tokens swap atomically
  *
  * If either party doesn't sign, or the intent expires, nothing happens.
  * No intermediary. No trust required. Pure coordination.
@@ -28,9 +28,9 @@ contract AtomicSwap is ERC8001 {
 
     /// @dev Swap terms encoded in coordinationData
     struct SwapTerms {
-        address tokenA; // Token Alice is offering
+        address tokenA;  // Token Alice is offering
         uint256 amountA; // Amount Alice is offering
-        address tokenB; // Token Bob is offering
+        address tokenB;  // Token Bob is offering
         uint256 amountB; // Amount Bob is offering
     }
 
@@ -67,7 +67,7 @@ contract AtomicSwap is ERC8001 {
     // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════
 
-    constructor() ERC8001("AtomicSwap", "1") {}
+    constructor() ERC8001() {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     // EXECUTION HOOK
@@ -77,26 +77,35 @@ contract AtomicSwap is ERC8001 {
      * @dev Execute the atomic swap.
      *      Both parties must have approved this contract for their tokens.
      */
-    function _executeCoordination(
+    function _executeCoordinationHook(
         bytes32 intentHash,
         CoordinationPayload calldata payload,
         bytes calldata /* executionData */
-    ) internal override {
+    ) internal override returns (bool, bytes memory) {
         // Validate coordination type
         if (payload.coordinationType != SWAP_TYPE) {
             revert InvalidSwapType();
         }
 
+        // Get participants from stored state (no longer in payload)
+        CoordinationState storage coord = _getCoordination(intentHash);
+
         // Validate exactly 2 participants
-        if (payload.participants.length != 2) {
+        if (coord.participants.length != 2) {
             revert InvalidParticipantCount();
         }
 
         // Decode swap terms
         SwapTerms memory terms = abi.decode(payload.coordinationData, (SwapTerms));
 
-        address partyA = payload.participants[0]; // Proposer
-        address partyB = payload.participants[1]; // Acceptor
+        // Find proposer and acceptor in participants array
+        address partyA = coord.proposer; // Proposer
+        address partyB;
+        if (coord.participants[0] == coord.proposer) {
+            partyB = coord.participants[1];
+        } else {
+            partyB = coord.participants[0];
+        }
 
         // Execute atomic swap:
         // 1. Transfer tokenA from partyA to partyB
@@ -108,6 +117,8 @@ contract AtomicSwap is ERC8001 {
         emit SwapExecuted(
             intentHash, partyA, partyB, terms.tokenA, terms.amountA, terms.tokenB, terms.amountB
         );
+
+        return (true, "");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

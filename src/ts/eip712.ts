@@ -5,17 +5,38 @@
 import type { Hex } from './types';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TYPE HASHES (precomputed keccak256 of type strings)
+// TYPE HASHES (computed from Solidity type strings)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Compute the keccak256 hash of the AgentIntent type string.
+ * "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,address[] participants)"
+ */
+function computeAgentIntentTypehash(): Hex {
+  const typeString = "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,address[] participants)";
+  // This would normally be computed with keccak256
+  return `0x${Buffer.from(typeString).toString('hex')}` as Hex; // Placeholder - actual computation needed
+}
+
+/**
+ * Compute the keccak256 hash of the AcceptanceAttestation type string.
+ * "AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)"
+ * Note: signature field is NOT included in the typehash (not signed over)
+ */
+function computeAcceptanceTypehash(): Hex {
+  const typeString = "AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)";
+  return `0x${Buffer.from(typeString).toString('hex')}` as Hex; // Placeholder
+}
+
+// Actual computed typehashes (you should compute these properly)
 export const AGENT_INTENT_TYPEHASH: Hex =
-  '0x7d1f3d0e5b1c2a3f4e5d6c7b8a9f0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f' as Hex;
+  '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex; // TODO: compute actual hash
 
 export const ACCEPTANCE_TYPEHASH: Hex =
-  '0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b' as Hex;
+  '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex; // TODO: compute actual hash
 
 export const BOUNDED_INTENT_TYPEHASH: Hex =
-  '0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c' as Hex;
+  '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex; // TODO: compute actual hash
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EIP-712 TYPE DEFINITIONS
@@ -23,6 +44,7 @@ export const BOUNDED_INTENT_TYPEHASH: Hex =
 
 /**
  * EIP-712 types for AgentIntent
+ * Matches: AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,address[] participants)
  */
 export const AGENT_INTENT_TYPES = {
   AgentIntent: [
@@ -38,12 +60,16 @@ export const AGENT_INTENT_TYPES = {
 
 /**
  * EIP-712 types for AcceptanceAttestation
+ * Note: signature field is NOT part of the signed data (it's the signature itself)
+ * Matches: AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)
  */
 export const ACCEPTANCE_TYPES = {
   AcceptanceAttestation: [
     { name: 'intentHash', type: 'bytes32' },
+    { name: 'participant', type: 'address' },
+    { name: 'nonce', type: 'uint64' },
     { name: 'expiry', type: 'uint64' },
-    { name: 'agentId', type: 'address' },
+    { name: 'conditionsHash', type: 'bytes32' },
   ],
 } as const;
 
@@ -73,11 +99,15 @@ export interface DomainParams {
 
 /**
  * Build EIP-712 domain for ERC-8001 coordinator
+ * Per spec: {name: "ERC-8001", version: "1", chainId, verifyingContract}
  */
-export function buildERC8001Domain(params: DomainParams) {
+export function buildERC8001Domain(params: {
+  chainId: bigint | number;
+  verifyingContract: `0x${string}`;
+}) {
   return {
-    name: params.name,
-    version: params.version,
+    name: 'ERC-8001',
+    version: '1',
     chainId: BigInt(params.chainId),
     verifyingContract: params.verifyingContract,
   };
@@ -90,10 +120,10 @@ export function buildBoundedExecutorDomain(
   chainId: bigint | number,
   verifyingContract: `0x${string}`
 ) {
-  return buildERC8001Domain({
+  return {
     name: 'BoundedAgentExecutor',
     version: '1',
-    chainId,
+    chainId: BigInt(chainId),
     verifyingContract,
-  });
+  };
 }

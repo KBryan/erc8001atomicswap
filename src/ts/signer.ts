@@ -18,9 +18,6 @@ import {
   type DomainParams,
 } from './eip712';
 import {
-  hashAgentIntent,
-  hashAcceptanceAttestation,
-  hashBoundedIntent,
   createAgentIntent,
   createBoundedIntent,
   createAcceptance,
@@ -34,7 +31,7 @@ import {
 
 export interface SignTypedDataParams {
   domain: DomainParams;
-  types: Record<string, { name: string; type: string }[]>;
+  types: Record<string, Array<{ name: string; type: string }>>;
   primaryType: string;
   message: Record<string, unknown>;
 }
@@ -68,7 +65,7 @@ export class ERC8001Signer {
 
     const signature = await this.signer.signTypedData({
       domain: this.domain,
-      types: AGENT_INTENT_TYPES,
+      types: AGENT_INTENT_TYPES as Record<string, Array<{ name: string; type: string }>>,
       primaryType: 'AgentIntent',
       message: {
         payloadHash: intent.payloadHash,
@@ -85,25 +82,41 @@ export class ERC8001Signer {
   }
 
   /**
-   * Sign an acceptance attestation
+   * Create and sign an acceptance attestation
+   * Per spec: AcceptanceAttestation includes signature field, but signature is NOT part of the type hash
    */
   async signAcceptance(
     intentHash: Hex,
-    expirySeconds?: number
+    participant: Address,
+    nonce: bigint,
+    expirySeconds?: number,
+    conditionsHash?: Hex
   ): Promise<{ attestation: AcceptanceAttestation; signature: Hex }> {
-    const agentId = await this.signer.getAddress();
-    const attestation = createAcceptance(intentHash, agentId, expirySeconds);
+    const attestation = createAcceptance(
+      intentHash,
+      participant,
+      nonce,
+      expirySeconds,
+      conditionsHash
+    );
 
+    // Sign the attestation WITHOUT the signature field (per EIP-712 spec)
     const signature = await this.signer.signTypedData({
       domain: this.domain,
-      types: ACCEPTANCE_TYPES,
+      types: ACCEPTANCE_TYPES as Record<string, Array<{ name: string; type: string }>>,
       primaryType: 'AcceptanceAttestation',
       message: {
         intentHash: attestation.intentHash,
+        participant: attestation.participant,
+        nonce: attestation.nonce,
         expiry: attestation.expiry,
-        agentId: attestation.agentId,
+        conditionsHash: attestation.conditionsHash,
+        // Note: signature field is NOT included in the signed data
       },
     });
+
+    // Add signature to attestation for transmission
+    attestation.signature = signature;
 
     return { attestation, signature };
   }
@@ -130,7 +143,7 @@ export class BoundedExecutorSigner {
 
     const signature = await this.signer.signTypedData({
       domain: this.domain,
-      types: BOUNDED_INTENT_TYPES,
+      types: BOUNDED_INTENT_TYPES as Record<string, Array<{ name: string; type: string }>>,
       primaryType: 'BoundedIntent',
       message: {
         payloadHash: intent.payloadHash,
@@ -161,7 +174,7 @@ export function fromViemWallet(walletClient: {
       chainId: bigint | number;
       verifyingContract: Address;
     };
-    types: Record<string, { name: string; type: string }[]>;
+    types: Record<string, Array<{ name: string; type: string }>>;
     primaryType: string;
     message: Record<string, unknown>;
   }) => Promise<Hex>;
@@ -199,7 +212,7 @@ export function fromEthersSigner(signer: {
       chainId: bigint | number;
       verifyingContract: string;
     },
-    types: Record<string, { name: string; type: string }[]>,
+    types: Record<string, Array<{ name: string; type: string }>>,
     value: Record<string, unknown>
   ) => Promise<string>;
 }): TypedDataSigner {
