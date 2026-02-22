@@ -147,7 +147,7 @@ Executed! New status: 3
 ### Utility Commands
 
 ```bash
-# Check swap status (0=None, 1=Proposed, 2=Ready, 3=Executed, 4=Cancelled)
+# Check swap status (0=None, 1=Proposed, 2=Ready, 3=Executed, 4=Cancelled, 5=Expired)
 INTENT_HASH=0x... \
 forge script script/SwapScripts.s.sol:CheckStatus \
   --rpc-url https://sepolia.base.org
@@ -207,14 +207,16 @@ ATOMIC_SWAP=0x... make deploy-mocks-only
 import {ERC8001} from "@erc8001/sdk/contracts/ERC8001.sol";
 
 contract MyCoordinator is ERC8001 {
-    constructor() ERC8001("MyCoordinator", "1") {}
+    // EIP-712 domain is hardcoded to {name: "ERC-8001", version: "1"}
+    constructor() ERC8001() {}
 
-    function _executeCoordination(
+    function _executeCoordinationHook(
         bytes32 intentHash,
         CoordinationPayload calldata payload,
         bytes calldata executionData
-    ) internal override {
+    ) internal override returns (bool success, bytes memory result) {
         // Your execution logic here
+        return (true, "");
     }
 }
 ```
@@ -236,9 +238,8 @@ const walletClient = createWalletClient({
 });
 
 // Create signer
+// Domain is always {name: "ERC-8001", version: "1"} per the spec
 const domain = buildERC8001Domain({
-  name: 'AtomicSwap',
-  version: '1',
   chainId: baseSepolia.id,
   verifyingContract: '0xD25FaF692736b74A674c8052F904b5C77f9cb2Ed',
 });
@@ -246,18 +247,21 @@ const domain = buildERC8001Domain({
 const signer = new ERC8001Signer(fromViemWallet(walletClient), domain);
 
 // Sign an intent
+// Note: participants must be in strictly ascending address order
 const { intent, payload, signature } = await signer.signIntent({
   coordinationType: SWAP_TYPE,
-  participants: [alice, bob],
+  participants: sortParticipants([alice, bob]),
   coordinationData: swapTerms,
   nonce: 1n,
   expirySeconds: 3600,
 });
 
-// Sign an acceptance
+// Sign an acceptance (signature is embedded in the AttestanceAttestation struct)
 const { attestation, signature: acceptSig } = await signer.signAcceptance(
   intentHash,
-  3600
+  bob,   // participant address
+  1n,    // acceptance nonce
+  3600   // expiry seconds
 );
 ```
 
@@ -317,7 +321,8 @@ erc8001-sdk/
 │       ├── utils.ts                 # Hash functions, builders
 │       └── signer.ts                # High-level signing API
 ├── test/
-│   └── AtomicSwap.t.sol             # Foundry tests
+│   ├── AtomicSwap.t.sol             # AtomicSwap integration tests (14 tests)
+│   └── ERC8001.t.sol                # ERC8001 base contract tests (20 tests)
 ├── script/
 │   ├── DeployAtomicSwap.s.sol       # Deployment scripts
 │   └── SwapScripts.s.sol            # Propose/Accept/Execute scripts
@@ -360,9 +365,12 @@ make help               # Show all commands
 This code is unaudited. Use at your own risk.
 
 Key security properties:
-- **EIP-712 signatures**: Prevents cross-domain replay attacks
-- **Nonce management**: Prevents replay of intents
-- **Expiry timestamps**: Limits validity window
+- **EIP-712 signatures**: Prevents cross-domain replay attacks; domain hardcoded to `{name: "ERC-8001", version: "1"}`
+- **Nonce management**: Per-agent monotonic nonces prevent replay of intents
+- **Canonical participants**: Participants must be strictly ascending by address; duplicates rejected
+- **Expiry timestamps**: Intent and per-acceptance expiries limit validity windows; status returns `Expired` dynamically
+- **Caller enforcement**: `acceptCoordination` requires `msg.sender == attestation.participant`
+- **Payload binding**: Intent commits to `payloadHash`; execute verifies payload before running
 - **Policy trees**: Restricts allowed operations (BoundedAgentExecutor)
 - **Budget limits**: Caps daily exposure per agent
 - **Timelocked governance**: Prevents instant policy changes

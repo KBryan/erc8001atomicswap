@@ -47,10 +47,11 @@ Alice has 100 USDC. Bob has 0.05 WETH. They want to trade.
 |----------|---------------|
 | **Atomic** | Both transfers happen or neither does |
 | **Trustless** | No intermediary holds funds |
-| **Permissionless** | Anyone can execute once both sign |
-| **Auditable** | On-chain proof of both parties' consent |
-| **Cancellable** | Proposer can cancel before execution |
-| **Time-bounded** | Intent expires if not executed |
+| **Permissionless** | Anyone can execute once all parties sign |
+| **Auditable** | On-chain proof of every party's consent |
+| **Cancellable** | Proposer can cancel; anyone can cancel after expiry |
+| **Time-bounded** | Intent and each acceptance carry independent expiries |
+| **Canonical** | Participants must be unique and strictly ascending by address |
 
 ## Run the Example
 
@@ -68,60 +69,78 @@ forge test --match-contract AtomicSwapTest -vvv
 
 ```solidity
 contract AtomicSwap is ERC8001 {
-    
-    function _executeCoordination(
+    // EIP-712 domain is hardcoded to {name: "ERC-8001", version: "1"}
+    constructor() ERC8001() {}
+
+    function _executeCoordinationHook(
         bytes32 intentHash,
         CoordinationPayload calldata payload,
         bytes calldata executionData
-    ) internal override {
-        // Decode the swap terms
+    ) internal override returns (bool success, bytes memory result) {
+        // Decode the swap terms from the payload
         SwapTerms memory terms = abi.decode(
-            payload.coordinationData, 
+            payload.coordinationData,
             (SwapTerms)
         );
 
-        address partyA = payload.participants[0];
-        address partyB = payload.participants[1];
+        // Participants are stored in the coordination state, not the payload.
+        // The proposer is always coord.proposer; the other party is the other participant.
+        CoordinationState storage coord = _getCoordination(intentHash);
+        address partyA = coord.proposer;
+        address partyB = coord.participants[0] == partyA
+            ? coord.participants[1]
+            : coord.participants[0];
 
         // Atomic swap: both transfers or revert
         IERC20(terms.tokenA).safeTransferFrom(partyA, partyB, terms.amountA);
         IERC20(terms.tokenB).safeTransferFrom(partyB, partyA, terms.amountB);
+
+        return (true, "");
     }
 }
 ```
 
 That's it. The base `ERC8001` contract handles:
-- Intent creation and validation
-- EIP-712 signature verification
-- Acceptance tracking
-- Status management (Proposed → Ready → Executed)
-- Expiry and nonce handling
-- Cancellation
+- Intent creation, EIP-712 signature verification, and nonce replay protection
+- Participant canonicalization (strictly ascending addresses, proposer must be included)
+- Per-acceptance expiry tracking — each acceptance can expire independently
+- Status management (`Proposed → Ready → Executed`; `Expired` returned dynamically)
+- Cancellation — proposer only before expiry, anyone after expiry
+- `getCoordinationStatus` returns the full tuple: status, proposer, participants, acceptedBy, expiry
 
-You just implement `_executeCoordination` with your business logic.
+You just implement `_executeCoordinationHook` with your business logic.
 
 ### TypeScript: Sign and Submit
 
 ```typescript
-import { ERC8001Signer, fromViemWallet } from '@erc8001/sdk';
+import { ERC8001Signer, buildERC8001Domain, fromViemWallet, sortParticipants } from '@erc8001/sdk';
 
-// Alice proposes
+// Domain is always {name: "ERC-8001", version: "1"} per the spec
+const domain = buildERC8001Domain({ chainId, verifyingContract: SWAP_ADDRESS });
+
+// Alice proposes — participants sorted ascending by address (required by spec)
 const { intent, payload, signature } = await aliceSigner.signIntent({
   coordinationType: SWAP_TYPE,
-  participants: [alice, bob],
+  participants: sortParticipants([alice, bob]),
   coordinationData: encodeSwapTerms(USDC, 100e6, WETH, 0.05e18),
   nonce: 1n,
 });
 
-// Submit to chain
-const intentHash = await swapContract.proposeCoordination(intent, payload, signature);
+// New param order: (intent, signature, payload)
+const intentHash = await swapContract.proposeCoordination(intent, signature, payload);
 
-// Bob accepts
-const { attestation, signature: bobSig } = await bobSigner.signAcceptance(intentHash);
-await swapContract.acceptCoordination(intentHash, attestation, bobSig);
+// Bob accepts — signature is now embedded inside AcceptanceAttestation
+// acceptCoordination requires msg.sender == attestation.participant
+const { attestation } = await bobSigner.signAcceptance(
+  intentHash,
+  bob,   // participant
+  1n,    // nonce
+  3600   // expiry seconds
+);
+await swapContract.acceptCoordination(intentHash, attestation); // returns bool allAccepted
 
-// Execute
-await swapContract.executeCoordination(intentHash, payload, '0x');
+// Execute — returns (bool success, bytes memory result)
+const [success, result] = await swapContract.executeCoordination(intentHash, payload, '0x');
 ```
 
 ## What If...
@@ -130,10 +149,10 @@ await swapContract.executeCoordination(intentHash, payload, '0x');
 → Nothing happens. Alice's tokens stay in her wallet.
 
 **The intent expires?**
-→ Can't execute. Alice can propose a new one.
+→ `getCoordinationStatus` returns `Expired` dynamically. Execution reverts. Anyone can call `cancelCoordination` to clean up. Alice can then propose a new one.
 
 **Alice changes her mind?**
-→ She can cancel before Bob accepts.
+→ She can cancel any time before the intent expires. After expiry, anyone can cancel on her behalf.
 
 **Bob accepts but no one executes?**
 → Anyone can execute. Set up a keeper, or execute yourself.

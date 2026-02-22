@@ -427,35 +427,44 @@ Bob signed an **AcceptanceAttestation**:
 
 ```solidity
 struct AcceptanceAttestation {
-    bytes32 intentHash;  // The intent Bob is accepting
-    uint64 expiry;       // When Bob's acceptance expires
-    address agentId;     // Bob's address
+    bytes32 intentHash;    // The intent Bob is accepting
+    address participant;   // Bob's address (renamed from agentId)
+    uint64  nonce;         // Replay protection for the acceptance itself
+    uint64  expiry;        // When Bob's acceptance expires
+    bytes32 conditionsHash;// Optional participant conditions
+    bytes   signature;     // Bob's EIP-712 signature (excluded from hash)
 }
 ```
 
-This proves Bob agreed to Alice's specific proposal.
+This proves Bob agreed to Alice's specific proposal. The `signature` field carries the ECDSA bytes but is excluded from the EIP-712 type hash — it is signed over the other five fields only.
 
 ### Atomic Execution
 
-The `_executeCoordination` function in AtomicSwap.sol:
+The `_executeCoordinationHook` function in AtomicSwap.sol:
 
 ```solidity
-function _executeCoordination(
+function _executeCoordinationHook(
     bytes32 intentHash,
     CoordinationPayload calldata payload,
     bytes calldata
-) internal override {
-    // Decode swap terms
+) internal override returns (bool success, bytes memory result) {
+    // Decode swap terms from the payload
     SwapTerms memory terms = decodeSwapTerms(payload.coordinationData);
-    
-    address partyA = payload.participants[0]; // Alice
-    address partyB = payload.participants[1]; // Bob
+
+    // Participants are now stored in coordination state, not the payload.
+    // Use coord.proposer to identify partyA reliably regardless of sort order.
+    CoordinationState storage coord = _getCoordination(intentHash);
+    address partyA = coord.proposer;
+    address partyB = coord.participants[0] == partyA
+        ? coord.participants[1]
+        : coord.participants[0];
 
     // ATOMIC: Both transfers in one transaction
-    IERC20(terms.tokenA).transferFrom(partyA, partyB, terms.amountA);
-    IERC20(terms.tokenB).transferFrom(partyB, partyA, terms.amountB);
-    
+    IERC20(terms.tokenA).safeTransferFrom(partyA, partyB, terms.amountA);
+    IERC20(terms.tokenB).safeTransferFrom(partyB, partyA, terms.amountB);
+
     // If either transfer fails, BOTH revert
+    return (true, "");
 }
 ```
 
@@ -470,8 +479,11 @@ If the first transfer succeeds but the second fails, the entire transaction reve
 1: Proposed  - Alice proposed, waiting for Bob
 2: Ready     - Bob accepted, ready to execute
 3: Executed  - Swap completed
-4: Cancelled - Alice cancelled before Bob accepted
+4: Cancelled - Cancelled by proposer (before expiry) or anyone (after expiry)
+5: Expired   - Returned dynamically when block.timestamp >= expiry; not stored
 ```
+
+Note: `Expired` is computed on the fly by `getCoordinationStatus` — the stored status remains `Proposed` or `Ready` until explicitly cancelled or executed.
 
 ---
 
@@ -538,43 +550,49 @@ contract GroupBet is ERC8001 {
     }
     
     mapping(bytes32 => address) public winners;
-    
-    constructor() ERC8001("GroupBet", "1") {}
-    
-    function _executeCoordination(
+
+    // EIP-712 domain is hardcoded to {name: "ERC-8001", version: "1"}
+    constructor() ERC8001() {}
+
+    function _executeCoordinationHook(
         bytes32 intentHash,
         CoordinationPayload calldata payload,
         bytes calldata executionData
-    ) internal override {
+    ) internal override returns (bool success, bytes memory result) {
         BetTerms memory terms = abi.decode(
-            payload.coordinationData, 
+            payload.coordinationData,
             (BetTerms)
         );
-        
+
+        // Participants are in coordination state, not in the payload
+        CoordinationState storage coord = _getCoordination(intentHash);
+
         // Collect stakes from all participants
         uint256 pot = 0;
-        for (uint i = 0; i < payload.participants.length; i++) {
+        for (uint i = 0; i < coord.participants.length; i++) {
             IERC20(terms.token).transferFrom(
-                payload.participants[i],
+                coord.participants[i],
                 address(this),
                 terms.amountPerPlayer
             );
             pot += terms.amountPerPlayer;
         }
-        
+
         // Winner set by oracle (in executionData)
         address winner = abi.decode(executionData, (address));
-        require(isParticipant(payload.participants, winner), "Not a player");
-        
+        require(_isParticipant(coord.participants, winner), "Not a player");
+
         // Transfer pot to winner
         IERC20(terms.token).transfer(winner, pot);
         winners[intentHash] = winner;
+
+        return (true, abi.encode(winner));
     }
-    
-    function isParticipant(
-        address[] memory participants, 
+
+    function _isParticipant(
+        address[] storage participants,
         address addr
-    ) internal pure returns (bool) {
+    ) internal view returns (bool) {
         for (uint i = 0; i < participants.length; i++) {
             if (participants[i] == addr) return true;
         }
@@ -588,7 +606,8 @@ contract GroupBet is ERC8001 {
 1. **Inherit ERC8001**
    ```solidity
    contract MyCoordinator is ERC8001 {
-       constructor() ERC8001("MyCoordinator", "1") {}
+       // Domain hardcoded to {name: "ERC-8001", version: "1"}
+       constructor() ERC8001() {}
    }
    ```
 
@@ -597,14 +616,15 @@ contract GroupBet is ERC8001 {
    bytes32 public constant MY_TYPE = keccak256("MY_COORDINATION_V1");
    ```
 
-3. **Implement `_executeCoordination`**
+3. **Implement `_executeCoordinationHook`**
    ```solidity
-   function _executeCoordination(
+   function _executeCoordinationHook(
        bytes32 intentHash,
        CoordinationPayload calldata payload,
        bytes calldata executionData
-   ) internal override {
-       // Your logic here
+   ) internal override returns (bool success, bytes memory result) {
+       // Your logic here; read participants from _getCoordination(intentHash)
+       return (true, "");
    }
    ```
 
@@ -630,23 +650,34 @@ contract GroupBet is ERC8001 {
 
 ## Troubleshooting
 
-### "NotParticipant" Error
+### `ERC8001_NotParticipant` Error
 
-**Problem:** The signer isn't in the participants list.
+**Problem:** The caller or attestation participant isn't in the intent's participants list, or `msg.sender != attestation.participant`.
 
 **Solution:** Check that:
-- You're using the correct private key
-- The address matches what's in the intent
-- Run `cast wallet address $YOUR_PK` to verify
+- You're calling `acceptCoordination` from the participant's own address (`msg.sender` must match)
+- The address is in the participants list that was set at propose time
+- Participants must be sorted ascending — run `sortParticipants([alice, bob])` in the SDK
+- Run `cast wallet address $YOUR_PK` to verify your address
 
-### "AlreadyAccepted" Error
+### `ERC8001_DuplicateAcceptance` Error
 
-**Problem:** Trying to accept an intent that's already been accepted.
+**Problem:** Trying to accept an intent that this participant has already accepted (proposer auto-accepts at propose time).
 
 **Solution:**
 - Check status with `CheckStatus` script
 - If status is 2 (Ready), proceed to execute
 - If status is 3 (Executed), the swap is done
+
+### `ERC8001_ParticipantsNotCanonical` Error
+
+**Problem:** The participants array passed to `proposeCoordination` is not in strictly ascending address order, or contains duplicates.
+
+**Solution:** Sort participants before building the intent:
+```typescript
+import { sortParticipants } from '@erc8001/sdk';
+const participants = sortParticipants([alice, bob]);
+```
 
 ### "InsufficientAllowance" or Transfer Fails
 
@@ -781,10 +812,11 @@ cast call 0x17abd6d0355cB2B933C014133B14245412ca00B6 "balanceOf(address)(uint256
 | Code | Status | Meaning |
 |------|--------|---------|
 | 0 | None | Intent doesn't exist |
-| 1 | Proposed | Waiting for acceptance |
+| 1 | Proposed | Waiting for all acceptances |
 | 2 | Ready | All parties accepted, can execute |
 | 3 | Executed | Coordination completed |
-| 4 | Cancelled | Proposer cancelled |
+| 4 | Cancelled | Cancelled (proposer before expiry, anyone after) |
+| 5 | Expired | Returned dynamically once `block.timestamp >= expiry` |
 
 ---
 
